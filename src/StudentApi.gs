@@ -81,6 +81,7 @@ function buildStudentHome_(me) {
     day: i + 1,
     state: questSet.has(d) ? 'O' : d < today ? 'X' : d === today ? 'today' : 'future',
     friend: hist.praiseTo[d] || '',
+    friendHidden: !hist.praiseTo[d] && !!hist.praiseHidden[d],
   }));
 
   // 연속 달성: 오늘 아직 안 했으면 어제부터 거꾸로 센다
@@ -101,7 +102,7 @@ function buildStudentHome_(me) {
   const todayQuest = {
     available: isSchoolDay,
     stamped: q.stamped || questSet.has(today),
-    praise: { done: q.praiseDone || !!sentToday, toName: sentToday || '' },
+    praise: { done: !!sentToday, toName: sentToday || '', hidden: !!hist.praiseHidden[today] && !sentToday },
     greet: { list: q.greet, done: q.greet.length >= 2 && q.greet[0] !== q.greet[1] },
     doze: {
       periods: dozePeriods_(today).map((p) => ({ period: p.period, subject: p.subject, val: q.doze[p.period] || '' })),

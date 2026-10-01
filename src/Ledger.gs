@@ -173,7 +173,7 @@ function getStudentHistory_(no) {
   const key = `hist_${dataVersion_()}_${todayStr_()}_${no}`;
   const hit = CacheService.getScriptCache().get(key);
   if (hit) return JSON.parse(hit);
-  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praisedNos: [], inbox: [], quest: null };
+  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null };
 }
 
 /**
@@ -199,7 +199,7 @@ function buildDataBundle_() {
 
   const nameOf = {};
   students.forEach((s) => (nameOf[s.no] = s.name));
-  const blank = () => ({ records: [], questDates: [], praiseTo: {}, praisedNos: [], inbox: [], quest: null });
+  const blank = () => ({ records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null });
   const hist = {};
   students.forEach((s) => (hist[s.no] = blank()));
   records.forEach((r) => {
@@ -211,11 +211,19 @@ function buildDataBundle_() {
   readPraise_().forEach((p) => {
     const from = hist[p.from];
     if (from) {
-      if (!from.praiseTo[p.date]) from.praiseTo[p.date] = nameOf[p.to] || '';
-      from.praisedNos.push(p.to);
+      // 숨긴 칭찬은 칭찬하지 않은 것으로 본다 (같은 친구를 다시 칭찬할 수 있음)
+      if (p.hidden) from.praiseHidden[p.date] = true;
+      else {
+        if (!from.praiseTo[p.date]) from.praiseTo[p.date] = nameOf[p.to] || '';
+        from.praisedNos.push(p.to);
+      }
     }
     const to = hist[p.to];
-    if (to && !p.hidden) to.inbox.unshift({ id: p.id, date: p.date, fromName: nameOf[p.from] || '친구', text: p.text, thanked: p.thanked });
+    if (to) {
+      to.inbox.unshift(p.hidden
+        ? { id: p.id, date: p.date, hidden: true }
+        : { id: p.id, date: p.date, fromName: nameOf[p.from] || '친구', text: p.text, thanked: p.thanked });
+    }
   });
   readQuestRows_().forEach((q) => {
     if (q.date === today && hist[q.no]) hist[q.no].quest = { praiseDone: q.praiseDone, stamped: q.stamped, greet: q.greet, doze: q.doze };

@@ -67,7 +67,9 @@ function adminSetPraiseHidden(token, id, hidden) {
   withLock_(() => {
     const p = readPraise_().find((x) => x.id === String(id));
     if (!p) throw new Error('칭찬을 찾을 수 없어요.');
+    if (p.hidden === !!hidden) return;
     sheet_(SHEETS.PRAISE).getRange(p.row, 6).setValue(!!hidden);
+    syncPraiseQuest_(p, !!hidden);
     invalidateStats_();
   });
   return buildAdminDashboard_();

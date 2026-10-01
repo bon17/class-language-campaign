@@ -72,7 +72,7 @@
         <select id="pFrom" class="grow"></select>
         <select id="pTo" class="grow"></select>
       </div>
-      <p class="muted">숨기면 받은 칭찬함에서 사라집니다. 일퀘 인정 여부는 기록장 탭에서 해당 "일퀘" 기록을 취소해 처리하세요.</p>
+      <p class="muted">숨기면 받은 친구에게 "담임 선생님이 숨긴 칭찬"으로 보이고, 보낸 친구의 그날 칭찬 미션은 미완료 처리됩니다(일퀘 도장 자동 취소).</p>
       <div id="praiseList"></div>
     </div>
 
@@ -311,7 +311,9 @@
 
   async function togglePraise(id, hidden) {
     const ok = await modal({ title: hidden ? '칭찬 숨기기' : '칭찬 다시 보이기',
-      html: hidden ? '<p>받은 칭찬함에서 사라집니다. 일퀘 도장은 그대로이니 필요하면 기록장에서 취소하세요.</p>' : '<p>받은 칭찬함에 다시 보입니다.</p>' });
+      html: hidden
+        ? '<p>받은 친구의 칭찬함에는 "담임 선생님이 숨긴 칭찬"으로만 보이고, 보낸 친구에게도 숨김 안내가 뜹니다.</p><p class="yellow">보낸 친구의 그날 칭찬 미션은 미완료가 되고, 이미 받은 일퀘 도장은 자동 취소됩니다.</p><p class="muted">오늘 칭찬이면 다른 칭찬을 다시 쓸 수 있어요.</p>'
+        : '<p>다시 보이게 하면 칭찬 미션이 인정되고, 인사·졸지 않기가 완료된 상태면 일퀘 도장이 다시 지급됩니다.</p>' });
     if (!ok) return;
     try { setData(await call('adminSetPraiseHidden', S.token, id, hidden)); toast(hidden ? '숨겼어요.' : '다시 보이게 했어요.'); }
     catch (e) { toast(e.message, true); }

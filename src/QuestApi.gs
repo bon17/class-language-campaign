@@ -185,7 +185,7 @@ function praiseSubmit(token, toNo, text) {
   if (!getStudentsCached_().some((s) => s.no === to)) throw new Error('없는 친구예요.');
 
   const stamped = updateQuest_(me, (q, today) => {
-    const all = readPraise_();
+    const all = readPraise_().filter((p) => !p.hidden);
     if (all.some((p) => p.from === me.no && p.date === today)) throw new Error('오늘은 이미 칭찬했어요. 칭찬은 하루 1번!');
     if (all.some((p) => p.from === me.no && p.to === to)) throw new Error('이미 칭찬한 친구예요. 다른 친구를 칭찬해 볼까요?');
     const id = 'P' + Date.now().toString(36).toUpperCase() + Math.floor(Math.random() * 1296).toString(36).toUpperCase();
@@ -200,12 +200,46 @@ function praiseThank(token, id) {
   const me = requireStudent_(token);
   withLock_(() => {
     const p = readPraise_().find((x) => x.id === String(id));
-    if (!p || p.to !== me.no || p.hidden) throw new Error('칭찬을 찾을 수 없어요.');
+    if (!p || p.to !== me.no || p.hidden) throw new Error('담임 선생님이 숨긴 칭찬이에요.');
     if (p.thanked) return;
     sheet_(SHEETS.PRAISE).getRange(p.row, 7).setValue(true);
     invalidateStats_();
   });
   return buildStudentHome_(me);
+}
+
+/**
+ * 담임이 칭찬을 숨기거나 다시 보이게 할 때 보낸 투투의 그날 퀘스트를 다시 맞춘다.
+ * 숨김: 칭찬 미션 미완료 + 이미 받은 일퀘 도장 자동 취소
+ * 해제: 칭찬 미션 완료 + 나머지 두 가지가 되어 있으면 도장 다시 지급
+ */
+function syncPraiseQuest_(p, hidden) {
+  withLock_(() => {
+    const q = readQuestRows_().find((r) => r.date === p.date && r.no === p.from);
+    if (!q) return;
+    if (hidden) {
+      // 같은 날 숨기지 않은 다른 칭찬이 있으면 미션은 그대로 인정
+      const other = readPraise_().some((x) => x.id !== p.id && x.from === p.from && x.date === p.date && !x.hidden);
+      if (other) return;
+      q.praiseDone = false;
+      if (q.stamped) {
+        readLedger_()
+          .filter((r) => !r.cancelled && r.mission === '일퀘' && r.no === p.from && r.date === p.date && r.score > 0)
+          .forEach((r) => cancelRecord_(r.id, '칭찬 숨김으로 칭찬 미션 미인정', '담임'));
+        q.stamped = false;
+      }
+    } else {
+      q.praiseDone = true;
+      q.greetDone = q.greet.length >= 2 && q.greet[0] !== q.greet[1];
+      q.dozeDone = dozeStatus_(q, p.date).done;
+      if (!q.stamped && q.greetDone && q.dozeDone) {
+        appendRecords_([{ date: p.date, no: p.from, mission: '일퀘', score: 1, inputType: '시스템', inputBy: '담임 숨김 해제', memo: '일퀘 3가지 완료' }]);
+        q.stamped = true;
+      }
+    }
+    writeQuestRow_(q);
+    invalidateStats_();
+  });
 }
 
 function withNotice_(home, stamped, msg) {
