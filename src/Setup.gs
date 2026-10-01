@@ -26,7 +26,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v3')) return;
+  if (!force && cache.get('schema_ok_v4')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -51,7 +51,26 @@ function ensureSchema_(force) {
     }
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
-  cache.put('schema_ok_v3', '1', 21600);
+  ensureConfigRows_(ss);
+  cache.put('schema_ok_v4', '1', 21600);
+}
+
+/** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
+function ensureConfigRows_(ss) {
+  const sh = ss.getSheetByName(SHEETS.CONFIG);
+  if (!sh) return;
+  const last = sh.getLastRow();
+  const labels = last > 1 ? sh.getRange(2, 1, last - 1, 1).getValues().map((r) => String(r[0]).trim()) : [];
+  const add = CONFIG_DEFS.filter((d) => labels.indexOf(d.label) < 0).map((d) => {
+    let v = toSheetValue_(d, d.def);
+    if (d.key === 'teacherCode' && !v) v = randomCode_(4);
+    if (d.key === 'adminCode' && !v) v = randomCode_(6);
+    return [d.label, v, d.desc];
+  });
+  if (add.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, add.length, 3).setValues(add);
+    CacheService.getScriptCache().remove(CACHE_KEYS.CONFIG);
+  }
 }
 
 function onOpen() {
@@ -189,7 +208,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v3']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v4']);
   invalidateStats_();
 }
 
