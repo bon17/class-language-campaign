@@ -141,6 +141,7 @@ function buildAdminDashboard_() {
   }));
 
   return {
+    spy: spyAdminData_(students),
     praises,
     noPraise,
     questGrid,

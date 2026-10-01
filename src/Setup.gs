@@ -11,9 +11,9 @@ function sheetDefs_() {
   { name: SHEETS.LEDGER, headers: LEDGER_HEADERS, textCols: [2, 3, 12] },
   { name: SHEETS.QUEST, headers: QUEST_HEADERS, textCols: [1, 2, 7, 8, 9] },
   { name: SHEETS.PRAISE, headers: PRAISE_HEADERS, textCols: [2, 3, 4, 8], widths: [140, 90, 70, 70, 360, 70, 70, 120] },
-  { name: SHEETS.SPY, headers: ['주차', '학생번호', '시작일', '종료일', '상태'], textCols: [2, 3, 4] },
-  { name: SHEETS.SPY_JUDGE, headers: ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위'], textCols: [1, 2, 3, 4, 5, 6, 7, 8] },
-  { name: SHEETS.ACCUSE, headers: ['타임스탬프', '지목한번호', '지목된번호', '결과'], textCols: [2, 3] },
+  { name: SHEETS.SPY, headers: SPY_HEADERS, textCols: [1, 2, 3, 4] },
+  { name: SHEETS.SPY_JUDGE, headers: SPY_JUDGE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8] },
+  { name: SHEETS.ACCUSE, headers: ACCUSE_HEADERS, textCols: [2, 3, 5] },
   { name: SHEETS.DRAW, headers: ['학생번호', '일퀘올클여부', '도장12개여부', '뽑기횟수', '뽑기완료횟수'], textCols: [1] },
   { name: SHEETS.TIMETABLE, headers: TIMETABLE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7], widths: [60, 80, 80, 80, 80, 80, 80] },
   { name: SHEETS.TT_OVERRIDE, headers: TT_OVERRIDE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
@@ -27,7 +27,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v6')) return;
+  if (!force && cache.get('schema_ok_v7')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -59,7 +59,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v6', '1', 21600);
+  cache.put('schema_ok_v7', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -96,7 +96,7 @@ function onOpen() {
 function onEdit(e) {
   try {
     const name = e && e.range && e.range.getSheet().getName();
-    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.TIMETABLE, SHEETS.TT_OVERRIDE, SHEETS.TEACHERS].indexOf(name) >= 0) clearAllCaches_();
+    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.TIMETABLE, SHEETS.TT_OVERRIDE, SHEETS.TEACHERS, SHEETS.SPY, SHEETS.SPY_JUDGE, SHEETS.ACCUSE].indexOf(name) >= 0) clearAllCaches_();
   } catch (err) {
     // 단순 트리거에서는 조용히 무시
   }
@@ -215,7 +215,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v6']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v7']);
   invalidateStats_();
 }
 

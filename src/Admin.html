@@ -35,6 +35,7 @@
       <button class="tab on" data-tab="overview">📊 현황</button>
       <button class="tab" data-tab="quest">✅ 일퀘</button>
       <button class="tab" data-tab="praise">💌 칭찬</button>
+      <button class="tab" data-tab="spy">🕵️ 암행어사</button>
       <button class="tab" data-tab="manual">✍️ 도장 입력</button>
       <button class="tab" data-tab="ledger">📜 기록장</button>
       <button class="tab" data-tab="settings">⚙️ 설정</button>
@@ -74,6 +75,29 @@
       </div>
       <p class="muted">숨기면 받은 친구에게 "담임 선생님이 숨긴 칭찬"으로 보이고, 보낸 친구의 그날 칭찬 미션은 미완료 처리됩니다(일퀘 도장 자동 취소).</p>
       <div id="praiseList"></div>
+    </div>
+
+    <!-- 암행어사 -->
+    <div id="tab-spy" class="box hidden" style="margin-top:0">
+      <div id="spyAlert"></div>
+      <h2 class="title-font">현재 암행어사 <span class="muted" style="font-size:13px">(이 화면은 담임만 볼 수 있어요)</span></h2>
+      <div id="spyNow"></div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">암행어사 지정</h2>
+      <div class="row">
+        <select id="spyNo" class="grow"></select>
+        <input id="spyStart" type="date" style="flex:0 1 170px">
+        <input id="spyEnd" type="date" style="flex:0 1 170px">
+      </div>
+      <div class="muted" id="spyWeeks" style="margin-top:4px"></div>
+      <button class="btn yellow block" style="margin-top:10px" id="spyBtn">🕵️ 비밀리에 지정하기</button>
+      <div class="neon-line"></div>
+      <h3>지정 기록</h3>
+      <div class="table-wrap"><table id="spyHist"></table></div>
+      <h3>판정 기록</h3>
+      <div class="table-wrap"><table id="spyJudges"></table></div>
+      <h3>지목 기록 <span class="muted" id="accCount" style="font-size:13px"></span></h3>
+      <div class="table-wrap"><table id="spyAcc"></table></div>
     </div>
 
     <!-- 수동 도장 -->
@@ -251,7 +275,7 @@
     const d = S.data;
     if (!d) return;
     $('stamp').textContent = `마지막 계산: ${d.computedAt}`;
-    renderOverview(); renderQuest(); renderPraise(); renderManual(); renderLedger(); renderSettings();
+    renderOverview(); renderQuest(); renderPraise(); renderSpy(); renderManual(); renderLedger(); renderSettings();
   }
 
   function renderOverview() {
@@ -264,7 +288,8 @@
       ['랭킹', c.rankLocked ? '🔒 잠금' : '🔓 공개'],
     ];
     $('cards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v" style="font-size:18px">${esc(v)}</div></div>`).join('');
-    $('warnings').innerHTML = d.warnings.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('');
+    $('warnings').innerHTML = (d.spy.needAppoint ? `<div class="warn">🚨 ${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>` : '') +
+      d.warnings.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('');
 
     $('sortBtn').textContent = S.sort === 'rank' ? '순위순 ▾' : '번호순 ▾';
     const list = d.students.slice().sort((a, b) =>
@@ -328,6 +353,48 @@
     catch (e) { toast(e.message, true); }
   }
 
+  function renderSpy() {
+    const d = S.data, sp = d.spy;
+    $('spyAlert').innerHTML = sp.needAppoint ? `<div class="warn" style="margin-top:0">🚨 ${sp.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요.</div>` : '';
+    $('spyNow').innerHTML = sp.active
+      ? `<div class="card"><div class="v" style="font-size:22px">${esc(sp.active.no)}. ${esc(sp.active.name)}</div>
+         <div class="muted">${esc(sp.active.week)}주차 · ${esc(sp.active.start)} ~ ${esc(sp.active.end)}</div></div>`
+      : '<p class="muted">지금 활동 중인 암행어사가 없어요.</p>';
+    const keep = $('spyNo').value;
+    $('spyNo').innerHTML = '<option value="">투투 선택</option>' + d.students.slice().sort((a, b) => Number(a.no) - Number(b.no))
+      .map((s) => `<option value="${esc(s.no)}">${esc(s.no)}. ${esc(s.name)}</option>`).join('');
+    $('spyNo').value = keep;
+    if (sp.suggest && !$('spyStart').value) { $('spyStart').value = sp.suggest.start; $('spyEnd').value = sp.suggest.end; }
+    $('spyWeeks').innerHTML = sp.weeks.map((w) => `<a href="#" data-week="${w.week}" class="sky">${w.week}주차 ${esc(w.start.slice(5))}~${esc(w.end.slice(5))}</a>`).join(' · ') +
+      ' <span>(누르면 날짜가 채워져요. 검거 후 교체할 때는 시작일을 오늘로)</span>';
+    $('spyHist').innerHTML = '<tr><th>주차</th><th class="left">암행어사</th><th>임기</th><th>상태</th><th></th></tr>' +
+      (sp.history.map((h) => `<tr><td>${esc(h.week)}</td><td class="left">${esc(h.name)}</td><td>${esc(h.start.slice(5))}~${esc(h.end.slice(5))}</td>
+        <td class="${h.status === '검거됨' ? 'minus' : h.status === '활동중' ? 'plus' : 'muted'}">${esc(h.status)}</td>
+        <td>${h.status === '활동중' ? `<button class="btn sm danger" data-dismiss="${h.row}">해임</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
+    $('spyJudges').innerHTML = '<tr><th>날짜</th><th class="left">암행어사</th><th class="left">😊 바른 1·2·3위</th><th class="left">🤬 나쁜 1·2·3위</th></tr>' +
+      (sp.judges.map((j) => `<tr><td>${esc(j.date.slice(5))}</td><td class="left">${esc(j.spy)}</td><td class="left plus">${j.good.map(esc).join(', ')}</td><td class="left minus">${j.bad.map(esc).join(', ') || '-'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">아직 없어요.</td></tr>');
+    $('accCount').textContent = `(${sp.accusedCount}/${d.students.length}명 사용)`;
+    $('spyAcc').innerHTML = '<tr><th>시각</th><th class="left">지목한</th><th class="left">지목된</th><th>결과</th><th>이동</th></tr>' +
+      (sp.accuses.map((a) => `<tr><td>${esc(String(a.ts).slice(5, 16))}</td><td class="left">${esc(a.from)}</td><td class="left">${esc(a.to)}</td>
+        <td class="${a.result === '성공' ? 'plus' : 'muted'}">${esc(a.result)}</td><td>${a.moved || ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
+  }
+
+  async function appointSpy() {
+    const no = $('spyNo').value, start = $('spyStart').value, end = $('spyEnd').value;
+    if (!no) return toast('투투를 선택해 주세요.', true);
+    const name = (S.data.students.find((s) => s.no === no) || {}).name;
+    const ok = await modal({ title: '암행어사 지정', html: `<p><b class="yellow">${esc(name)}</b> · ${esc(start)} ~ ${esc(end)}</p><p class="muted">지정된 투투의 화면에만 "암행어사 임무"가 나타나요.</p>`, okText: '지정' });
+    if (!ok) return;
+    try { setData(await call('adminAppointSpy', S.token, { no, start, end })); $('spyNo').value = ''; toast('지정했어요. 🤫'); }
+    catch (e) { toast(e.message, true); }
+  }
+
+  async function dismissSpy(row) {
+    const ok = await modal({ title: '암행어사 해임', html: '<p>잘못 지정했을 때 쓰세요. 이미 받은 도장은 그대로예요.</p>', okText: '해임', danger: true });
+    if (!ok) return;
+    try { setData(await call('adminDismissSpy', S.token, row)); toast('해임했어요.'); } catch (e) { toast(e.message, true); }
+  }
+
   function renderManual() {
     const d = S.data;
     const valid = new Set(d.students.map((s) => s.no));
@@ -388,7 +455,7 @@
   function switchTab(tab) {
     S.tab = tab;
     document.querySelectorAll('#tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-    ['overview', 'quest', 'praise', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
+    ['overview', 'quest', 'praise', 'spy', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
   }
 
   async function submitManual() {
@@ -459,6 +526,13 @@
   $('lockBtn').onclick = toggleLock;
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
+  $('spyBtn').onclick = appointSpy;
+  $('spyHist').onclick = (e) => { const b = e.target.closest('[data-dismiss]'); if (b) dismissSpy(Number(b.dataset.dismiss)); };
+  $('spyWeeks').onclick = (e) => {
+    const a = e.target.closest('[data-week]'); if (!a) return; e.preventDefault();
+    const w = S.data.spy.weeks.find((x) => String(x.week) === a.dataset.week);
+    if (w) { $('spyStart').value = w.start; $('spyEnd').value = w.end; }
+  };
   $('tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); };
   $('studentChips').onclick = (e) => {
     const b = e.target.closest('[data-no]');

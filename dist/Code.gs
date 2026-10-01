@@ -829,6 +829,270 @@ function withNotice_(home, stamped, msg) {
   return home;
 }
 
+// ===================== SpyApi.gs =====================
+/**
+ * 미션2: 욕설 암행어사를 찾아라!
+ * - 담임이 비밀리에 암행어사 지정(임기 1주). 정체는 본인 화면에만 내려보낸다.
+ * - 암행어사 일일 판정(하루 1회): 바른 1·2·3위 +5/+3/+1, 나쁜 1·2·3위 −5/−3/−1, 제출 시 활동 보상 +3
+ * - 지목(기간 중 1회): 현 암행어사를 맞히면 그 암행어사가 "암행어사 활동 보상"으로 받은 도장 전부를 가져온다
+ *   (기록장에 −/+ 두 줄), 암행어사는 즉시 직위 상실 → 담임에게 "새 암행어사 지정 필요"
+ * - 실패하면 기회만 소진. 결과는 본인에게만 (설정 "지목 결과 공개" ON이면 검거 소식 공개)
+ */
+
+const SPY_HEADERS = ['주차', '학생번호', '시작일', '종료일', '상태', '변경시각'];
+const SPY_JUDGE_HEADERS = ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위', '타임스탬프'];
+const ACCUSE_HEADERS = ['타임스탬프', '지목한번호', '지목된번호', '결과', '날짜', '이전도장수'];
+const GOOD_SCORES = [5, 3, 1];
+const BAD_SCORES = [-5, -3, -1];
+const SPY_REWARD = 3;
+
+// ---------- 읽기 ----------
+
+function readSpies_() {
+  const sh = ss_().getSheetByName(SHEETS.SPY);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, SPY_HEADERS.length).getValues().map((r, i) => ({
+    row: i + 2,
+    week: String(r[0]).trim(),
+    no: String(r[1]).trim(),
+    start: toDateStr_(r[2]),
+    end: toDateStr_(r[3]),
+    status: String(r[4]).trim() || '활동중',
+  })).filter((s) => s.no && s.start && s.end);
+}
+
+function readJudges_() {
+  const sh = ss_().getSheetByName(SHEETS.SPY_JUDGE);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, SPY_JUDGE_HEADERS.length).getValues().map((r) => ({
+    date: toDateStr_(r[0]),
+    spy: String(r[1]).trim(),
+    good: [r[2], r[3], r[4]].map((x) => String(x).trim()).filter(Boolean),
+    bad: [r[5], r[6], r[7]].map((x) => String(x).trim()).filter(Boolean),
+  })).filter((j) => j.date);
+}
+
+function readAccuses_() {
+  const sh = ss_().getSheetByName(SHEETS.ACCUSE);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, ACCUSE_HEADERS.length).getValues().map((r) => ({
+    ts: r[0] instanceof Date ? Utilities.formatDate(r[0], TZ, 'yyyy-MM-dd HH:mm') : String(r[0]),
+    from: String(r[1]).trim(),
+    to: String(r[2]).trim(),
+    result: String(r[3]).trim(),
+    date: toDateStr_(r[4]) || (r[0] instanceof Date ? Utilities.formatDate(r[0], TZ, 'yyyy-MM-dd') : ''),
+    moved: Number(r[5]) || 0,
+  })).filter((a) => a.from);
+}
+
+/** 오늘 활동 중인 암행어사 (없으면 null) */
+function activeSpy_(spies, today) {
+  return spies.find((s) => s.status === '활동중' && s.start <= today && today <= s.end) || null;
+}
+
+/** 등교일을 월요일 기준 주 단위로 나눈다 → [{week:1, start, end}] */
+function campaignWeeks_() {
+  const weeks = [];
+  getConfig().schoolDays.forEach((d) => {
+    const [y, m, dd] = d.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, dd));
+    dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
+    const monday = dt.toISOString().slice(0, 10);
+    let w = weeks.find((x) => x.monday === monday);
+    if (!w) weeks.push((w = { week: weeks.length + 1, monday, start: d, end: d }));
+    w.end = d;
+  });
+  return weeks.map(({ week, start, end }) => ({ week, start, end }));
+}
+
+/** 투투 화면용 요약 (데이터 버전으로 캐시) */
+function getSpyData_() {
+  const key = `spy_${dataVersion_()}`;
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  ensureSchema_();
+  const data = { spies: readSpies_(), judgedDates: readJudges_().map((j) => j.date), accuses: readAccuses_() };
+  cache.put(key, JSON.stringify(data), CACHE_TTL_SEC);
+  return data;
+}
+
+// ---------- 투투 화면 데이터 ----------
+
+/** 내 화면에 붙일 암행어사 관련 정보. 암행어사 정체는 본인일 때만 담는다. */
+function spyHomeFor_(me, today) {
+  const cfg = getConfig();
+  const d = getSpyData_();
+  const active = activeSpy_(d.spies, today);
+  const mine = d.accuses.find((a) => a.from === me.no);
+  const nameOf = {};
+  getStudentsCached_().forEach((s) => (nameOf[s.no] = s.name));
+
+  const out = {
+    accuse: mine
+      ? { used: true, success: mine.result === '성공', targetName: nameOf[mine.to] || '', moved: mine.moved, date: mine.date }
+      : { used: false },
+    news: cfg.accuseResultPublic
+      ? d.accuses.filter((a) => a.result === '성공').map((a) => ({ date: a.date, accuser: nameOf[a.from] || '', spy: nameOf[a.to] || '', moved: a.moved }))
+      : [],
+    mission: null,
+  };
+  if (active && active.no === me.no) {
+    out.mission = {
+      week: active.week,
+      start: active.start,
+      end: active.end,
+      isSchoolDay: cfg.schoolDays.indexOf(today) >= 0,
+      judgedToday: d.judgedDates.indexOf(today) >= 0,
+      reward: SPY_REWARD,
+    };
+  }
+  return out;
+}
+
+// ---------- 암행어사 판정 ----------
+
+/** good: [1위, 2위, 3위] 번호 (3명 모두), bad: 0~3명 번호 (순서대로) */
+function spyJudge(token, good, bad) {
+  const me = requireStudent_(token);
+  const cfg = getConfig();
+  const today = todayStr_();
+  if (cfg.schoolDays.indexOf(today) < 0) throw new Error('오늘은 캠페인 등교일이 아니에요.');
+  const valid = new Set(getStudentsCached_().map((s) => s.no));
+  const g = (good || []).map(String).filter(Boolean);
+  const b = (bad || []).map(String).filter(Boolean);
+  if (g.length !== 3) throw new Error('바른 언어 1·2·3위를 모두 골라 주세요.');
+  if (b.length > 3) throw new Error('나쁜 언어는 3명까지 고를 수 있어요.');
+  const all = g.concat(b);
+  if (all.some((n) => !valid.has(n))) throw new Error('없는 친구가 있어요.');
+  if (all.indexOf(me.no) >= 0) throw new Error('자기 자신은 고를 수 없어요.');
+  if (new Set(all).size !== all.length) throw new Error('한 친구를 두 번 고를 수 없어요. (바른·나쁜 동시 선택도 안 돼요)');
+
+  withLock_(() => {
+    ensureSchema_();
+    const active = activeSpy_(readSpies_(), today);
+    if (!active || active.no !== me.no) throw new Error('지금은 암행어사 임무를 할 수 없어요.');
+    if (readJudges_().some((j) => j.date === today)) throw new Error('오늘 판정은 이미 제출했어요.');
+    const sh = sheet_(SHEETS.SPY_JUDGE);
+    const row = [today, me.no, g[0], g[1], g[2], b[0] || '', b[1] || '', b[2] || '', new Date()];
+    sh.getRange(sh.getLastRow() + 1, 1, 1, SPY_JUDGE_HEADERS.length).setValues([row]);
+    const recs = [];
+    g.forEach((no, i) => recs.push({ date: today, no, mission: '암행어사판정', score: GOOD_SCORES[i], inputType: '암행어사', inputBy: me.no, memo: `바른 언어 ${i + 1}위` }));
+    b.forEach((no, i) => recs.push({ date: today, no, mission: '암행어사판정', score: BAD_SCORES[i], inputType: '암행어사', inputBy: me.no, memo: `나쁜 언어 ${i + 1}위` }));
+    recs.push({ date: today, no: me.no, mission: '암행어사활동', score: SPY_REWARD, inputType: '시스템', inputBy: '자동', memo: '판정 제출 보상' });
+    appendRecords_(recs);
+  });
+  const home = buildStudentHome_(me);
+  home.notice = `🕵️ 오늘 판정 완료! 활동 보상 +${SPY_REWARD}`;
+  return home;
+}
+
+// ---------- 지목(검거) ----------
+
+function accuseSpy(token, targetNo) {
+  const me = requireStudent_(token);
+  const cfg = getConfig();
+  const today = todayStr_();
+  const to = String(targetNo || '').trim();
+  if (cfg.schoolDays.indexOf(today) < 0) throw new Error('지목은 캠페인 등교일에만 할 수 있어요.');
+  if (!to) throw new Error('지목할 친구를 골라 주세요.');
+  if (to === me.no) throw new Error('자기 자신은 지목할 수 없어요.');
+  if (!getStudentsCached_().some((s) => s.no === to)) throw new Error('없는 친구예요.');
+
+  let success = false;
+  let moved = 0;
+  withLock_(() => {
+    ensureSchema_();
+    if (readAccuses_().some((a) => a.from === me.no)) throw new Error('지목 기회는 기간 중 1번뿐이에요. 이미 사용했어요.');
+    const active = activeSpy_(readSpies_(), today);
+    success = !!active && active.no === to;
+    if (success) {
+      moved = readLedger_()
+        .filter((r) => !r.cancelled && r.no === to && r.mission === '암행어사활동')
+        .reduce((sum, r) => sum + r.score, 0);
+      if (moved > 0) {
+        appendRecords_([
+          { date: today, no: to, mission: '검거이전', score: -moved, inputType: '시스템', inputBy: '자동', memo: `검거됨 → ${me.no}번에게 활동 보상 이전` },
+          { date: today, no: me.no, mission: '검거이전', score: moved, inputType: '시스템', inputBy: '자동', memo: `${to}번 암행어사 검거 성공` },
+        ]);
+      }
+      sheet_(SHEETS.SPY).getRange(active.row, 5, 1, 2).setValues([['검거됨', new Date()]]);
+    }
+    const sh = sheet_(SHEETS.ACCUSE);
+    sh.getRange(sh.getLastRow() + 1, 1, 1, ACCUSE_HEADERS.length).setValues([[new Date(), me.no, to, success ? '성공' : '실패', today, moved]]);
+    invalidateStats_();
+  });
+  const home = buildStudentHome_(me);
+  home.notice = success
+    ? `🎉 검거 성공! 암행어사 활동 보상 ${moved}개를 가져왔어요!`
+    : '아쉽지만 암행어사가 아니었어요.';
+  home.accuseResult = { success, moved };
+  return home;
+}
+
+// ---------- 담임 ----------
+
+/** payload: {no, start, end, week} */
+function adminAppointSpy(token, payload) {
+  requireAdmin_(token);
+  const p = payload || {};
+  const no = String(p.no || '').trim();
+  const start = toDateStr_(p.start || '');
+  const end = toDateStr_(p.end || '');
+  if (!getStudentsCached_().some((s) => s.no === no)) throw new Error('투투를 선택해 주세요.');
+  if (!start || !end || start > end) throw new Error('임기 시작일·종료일을 확인해 주세요.');
+  withLock_(() => {
+    ensureSchema_();
+    const overlap = readSpies_().find((s) => s.status === '활동중' && !(s.end < start || end < s.start));
+    if (overlap) throw new Error(`기간이 겹치는 활동 중인 암행어사가 있어요 (${overlap.start.slice(5)}~${overlap.end.slice(5)}). 먼저 해임해 주세요.`);
+    const week = String(p.week || (campaignWeeks_().find((w) => w.start <= start && start <= w.end) || {}).week || '');
+    const sh = sheet_(SHEETS.SPY);
+    sh.getRange(sh.getLastRow() + 1, 1, 1, SPY_HEADERS.length).setValues([[week, no, start, end, '활동중', new Date()]]);
+    invalidateStats_();
+  });
+  return buildAdminDashboard_();
+}
+
+/** 실수로 지정했을 때 등: 상태를 "해임"으로 */
+function adminDismissSpy(token, row) {
+  requireAdmin_(token);
+  withLock_(() => {
+    const s = readSpies_().find((x) => x.row === Number(row));
+    if (!s) throw new Error('암행어사 기록을 찾을 수 없어요.');
+    sheet_(SHEETS.SPY).getRange(s.row, 5, 1, 2).setValues([['해임', new Date()]]);
+    invalidateStats_();
+  });
+  return buildAdminDashboard_();
+}
+
+/** 담임 대시보드용 암행어사 현황 */
+function spyAdminData_(students) {
+  const cfg = getConfig();
+  const today = todayStr_();
+  const nameOf = {};
+  students.forEach((s) => (nameOf[s.no] = s.name));
+  const nm = (no) => (no ? `${no}. ${nameOf[no] || '?'}` : '');
+  const spies = readSpies_();
+  const active = activeSpy_(spies, today);
+  const inCampaign = cfg.schoolDays.length && cfg.schoolDays[0] <= today && today <= cfg.schoolDays[cfg.schoolDays.length - 1];
+  const weeks = campaignWeeks_();
+  const curWeek = weeks.find((w) => w.start <= today && today <= w.end) || weeks.find((w) => today < w.start) || weeks[0] || null;
+  return {
+    active: active ? { no: active.no, name: nameOf[active.no] || '', start: active.start, end: active.end, week: active.week } : null,
+    needAppoint: !!inCampaign && !active,
+    caughtToday: spies.some((s) => s.status === '검거됨' && !active && s.start <= today && today <= s.end),
+    weeks,
+    suggest: curWeek ? { week: curWeek.week, start: today > curWeek.start ? today : curWeek.start, end: curWeek.end } : null,
+    history: spies.slice().reverse().map((s) => ({
+      row: s.row, week: s.week, name: nm(s.no), start: s.start, end: s.end,
+      status: s.status === '활동중' && s.end < today ? '임기종료' : s.status,
+    })),
+    judges: readJudges_().reverse().map((j) => ({ date: j.date, spy: nm(j.spy), good: j.good.map(nm), bad: j.bad.map(nm) })),
+    accuses: readAccuses_().reverse().map((a) => ({ ts: a.ts, from: nm(a.from), to: nm(a.to), result: a.result, moved: a.moved })),
+    accusedCount: readAccuses_().length,
+  };
+}
+
 // ===================== Auth.gs =====================
 /**
  * 코드 로그인 → 서버가 발급한 토큰으로 이후 요청을 검증한다.
@@ -993,9 +1257,9 @@ function sheetDefs_() {
   { name: SHEETS.LEDGER, headers: LEDGER_HEADERS, textCols: [2, 3, 12] },
   { name: SHEETS.QUEST, headers: QUEST_HEADERS, textCols: [1, 2, 7, 8, 9] },
   { name: SHEETS.PRAISE, headers: PRAISE_HEADERS, textCols: [2, 3, 4, 8], widths: [140, 90, 70, 70, 360, 70, 70, 120] },
-  { name: SHEETS.SPY, headers: ['주차', '학생번호', '시작일', '종료일', '상태'], textCols: [2, 3, 4] },
-  { name: SHEETS.SPY_JUDGE, headers: ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위'], textCols: [1, 2, 3, 4, 5, 6, 7, 8] },
-  { name: SHEETS.ACCUSE, headers: ['타임스탬프', '지목한번호', '지목된번호', '결과'], textCols: [2, 3] },
+  { name: SHEETS.SPY, headers: SPY_HEADERS, textCols: [1, 2, 3, 4] },
+  { name: SHEETS.SPY_JUDGE, headers: SPY_JUDGE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8] },
+  { name: SHEETS.ACCUSE, headers: ACCUSE_HEADERS, textCols: [2, 3, 5] },
   { name: SHEETS.DRAW, headers: ['학생번호', '일퀘올클여부', '도장12개여부', '뽑기횟수', '뽑기완료횟수'], textCols: [1] },
   { name: SHEETS.TIMETABLE, headers: TIMETABLE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7], widths: [60, 80, 80, 80, 80, 80, 80] },
   { name: SHEETS.TT_OVERRIDE, headers: TT_OVERRIDE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
@@ -1009,7 +1273,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v6')) return;
+  if (!force && cache.get('schema_ok_v7')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -1041,7 +1305,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v6', '1', 21600);
+  cache.put('schema_ok_v7', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -1078,7 +1342,7 @@ function onOpen() {
 function onEdit(e) {
   try {
     const name = e && e.range && e.range.getSheet().getName();
-    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.TIMETABLE, SHEETS.TT_OVERRIDE, SHEETS.TEACHERS].indexOf(name) >= 0) clearAllCaches_();
+    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.TIMETABLE, SHEETS.TT_OVERRIDE, SHEETS.TEACHERS, SHEETS.SPY, SHEETS.SPY_JUDGE, SHEETS.ACCUSE].indexOf(name) >= 0) clearAllCaches_();
   } catch (err) {
     // 단순 트리거에서는 조용히 무시
   }
@@ -1197,7 +1461,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v6']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v7']);
   invalidateStats_();
 }
 
@@ -1375,6 +1639,7 @@ function buildStudentHome_(me) {
     teachers: cfg.teacherList.map((t) => t.name),
     praiseMinLength: cfg.praiseMinLength,
     inbox: hist.inbox,
+    spy: spyHomeFor_(me, today),
     serverTime: Utilities.formatDate(new Date(), TZ, 'HH:mm:ss'),
   };
 }
@@ -1671,6 +1936,7 @@ function buildAdminDashboard_() {
   }));
 
   return {
+    spy: spyAdminData_(students),
     praises,
     noPraise,
     questGrid,
@@ -1778,6 +2044,7 @@ const HTML_SOURCES = {
       <button class="tab on" data-tab="overview">📊 현황</button>
       <button class="tab" data-tab="quest">✅ 일퀘</button>
       <button class="tab" data-tab="praise">💌 칭찬</button>
+      <button class="tab" data-tab="spy">🕵️ 암행어사</button>
       <button class="tab" data-tab="manual">✍️ 도장 입력</button>
       <button class="tab" data-tab="ledger">📜 기록장</button>
       <button class="tab" data-tab="settings">⚙️ 설정</button>
@@ -1817,6 +2084,29 @@ const HTML_SOURCES = {
       </div>
       <p class="muted">숨기면 받은 친구에게 "담임 선생님이 숨긴 칭찬"으로 보이고, 보낸 친구의 그날 칭찬 미션은 미완료 처리됩니다(일퀘 도장 자동 취소).</p>
       <div id="praiseList"></div>
+    </div>
+
+    <!-- 암행어사 -->
+    <div id="tab-spy" class="box hidden" style="margin-top:0">
+      <div id="spyAlert"></div>
+      <h2 class="title-font">현재 암행어사 <span class="muted" style="font-size:13px">(이 화면은 담임만 볼 수 있어요)</span></h2>
+      <div id="spyNow"></div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">암행어사 지정</h2>
+      <div class="row">
+        <select id="spyNo" class="grow"></select>
+        <input id="spyStart" type="date" style="flex:0 1 170px">
+        <input id="spyEnd" type="date" style="flex:0 1 170px">
+      </div>
+      <div class="muted" id="spyWeeks" style="margin-top:4px"></div>
+      <button class="btn yellow block" style="margin-top:10px" id="spyBtn">🕵️ 비밀리에 지정하기</button>
+      <div class="neon-line"></div>
+      <h3>지정 기록</h3>
+      <div class="table-wrap"><table id="spyHist"></table></div>
+      <h3>판정 기록</h3>
+      <div class="table-wrap"><table id="spyJudges"></table></div>
+      <h3>지목 기록 <span class="muted" id="accCount" style="font-size:13px"></span></h3>
+      <div class="table-wrap"><table id="spyAcc"></table></div>
     </div>
 
     <!-- 수동 도장 -->
@@ -1994,7 +2284,7 @@ const HTML_SOURCES = {
     const d = S.data;
     if (!d) return;
     $('stamp').textContent = \`마지막 계산: \${d.computedAt}\`;
-    renderOverview(); renderQuest(); renderPraise(); renderManual(); renderLedger(); renderSettings();
+    renderOverview(); renderQuest(); renderPraise(); renderSpy(); renderManual(); renderLedger(); renderSettings();
   }
 
   function renderOverview() {
@@ -2007,7 +2297,8 @@ const HTML_SOURCES = {
       ['랭킹', c.rankLocked ? '🔒 잠금' : '🔓 공개'],
     ];
     $('cards').innerHTML = cards.map(([k, v]) => \`<div class="card"><div class="k">\${esc(k)}</div><div class="v" style="font-size:18px">\${esc(v)}</div></div>\`).join('');
-    $('warnings').innerHTML = d.warnings.map((w) => \`<div class="warn">⚠️ \${esc(w)}</div>\`).join('');
+    $('warnings').innerHTML = (d.spy.needAppoint ? \`<div class="warn">🚨 \${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>\` : '') +
+      d.warnings.map((w) => \`<div class="warn">⚠️ \${esc(w)}</div>\`).join('');
 
     $('sortBtn').textContent = S.sort === 'rank' ? '순위순 ▾' : '번호순 ▾';
     const list = d.students.slice().sort((a, b) =>
@@ -2071,6 +2362,48 @@ const HTML_SOURCES = {
     catch (e) { toast(e.message, true); }
   }
 
+  function renderSpy() {
+    const d = S.data, sp = d.spy;
+    $('spyAlert').innerHTML = sp.needAppoint ? \`<div class="warn" style="margin-top:0">🚨 \${sp.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요.</div>\` : '';
+    $('spyNow').innerHTML = sp.active
+      ? \`<div class="card"><div class="v" style="font-size:22px">\${esc(sp.active.no)}. \${esc(sp.active.name)}</div>
+         <div class="muted">\${esc(sp.active.week)}주차 · \${esc(sp.active.start)} ~ \${esc(sp.active.end)}</div></div>\`
+      : '<p class="muted">지금 활동 중인 암행어사가 없어요.</p>';
+    const keep = $('spyNo').value;
+    $('spyNo').innerHTML = '<option value="">투투 선택</option>' + d.students.slice().sort((a, b) => Number(a.no) - Number(b.no))
+      .map((s) => \`<option value="\${esc(s.no)}">\${esc(s.no)}. \${esc(s.name)}</option>\`).join('');
+    $('spyNo').value = keep;
+    if (sp.suggest && !$('spyStart').value) { $('spyStart').value = sp.suggest.start; $('spyEnd').value = sp.suggest.end; }
+    $('spyWeeks').innerHTML = sp.weeks.map((w) => \`<a href="#" data-week="\${w.week}" class="sky">\${w.week}주차 \${esc(w.start.slice(5))}~\${esc(w.end.slice(5))}</a>\`).join(' · ') +
+      ' <span>(누르면 날짜가 채워져요. 검거 후 교체할 때는 시작일을 오늘로)</span>';
+    $('spyHist').innerHTML = '<tr><th>주차</th><th class="left">암행어사</th><th>임기</th><th>상태</th><th></th></tr>' +
+      (sp.history.map((h) => \`<tr><td>\${esc(h.week)}</td><td class="left">\${esc(h.name)}</td><td>\${esc(h.start.slice(5))}~\${esc(h.end.slice(5))}</td>
+        <td class="\${h.status === '검거됨' ? 'minus' : h.status === '활동중' ? 'plus' : 'muted'}">\${esc(h.status)}</td>
+        <td>\${h.status === '활동중' ? \`<button class="btn sm danger" data-dismiss="\${h.row}">해임</button>\` : ''}</td></tr>\`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
+    $('spyJudges').innerHTML = '<tr><th>날짜</th><th class="left">암행어사</th><th class="left">😊 바른 1·2·3위</th><th class="left">🤬 나쁜 1·2·3위</th></tr>' +
+      (sp.judges.map((j) => \`<tr><td>\${esc(j.date.slice(5))}</td><td class="left">\${esc(j.spy)}</td><td class="left plus">\${j.good.map(esc).join(', ')}</td><td class="left minus">\${j.bad.map(esc).join(', ') || '-'}</td></tr>\`).join('') || '<tr><td colspan="4" class="muted">아직 없어요.</td></tr>');
+    $('accCount').textContent = \`(\${sp.accusedCount}/\${d.students.length}명 사용)\`;
+    $('spyAcc').innerHTML = '<tr><th>시각</th><th class="left">지목한</th><th class="left">지목된</th><th>결과</th><th>이동</th></tr>' +
+      (sp.accuses.map((a) => \`<tr><td>\${esc(String(a.ts).slice(5, 16))}</td><td class="left">\${esc(a.from)}</td><td class="left">\${esc(a.to)}</td>
+        <td class="\${a.result === '성공' ? 'plus' : 'muted'}">\${esc(a.result)}</td><td>\${a.moved || ''}</td></tr>\`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
+  }
+
+  async function appointSpy() {
+    const no = $('spyNo').value, start = $('spyStart').value, end = $('spyEnd').value;
+    if (!no) return toast('투투를 선택해 주세요.', true);
+    const name = (S.data.students.find((s) => s.no === no) || {}).name;
+    const ok = await modal({ title: '암행어사 지정', html: \`<p><b class="yellow">\${esc(name)}</b> · \${esc(start)} ~ \${esc(end)}</p><p class="muted">지정된 투투의 화면에만 "암행어사 임무"가 나타나요.</p>\`, okText: '지정' });
+    if (!ok) return;
+    try { setData(await call('adminAppointSpy', S.token, { no, start, end })); $('spyNo').value = ''; toast('지정했어요. 🤫'); }
+    catch (e) { toast(e.message, true); }
+  }
+
+  async function dismissSpy(row) {
+    const ok = await modal({ title: '암행어사 해임', html: '<p>잘못 지정했을 때 쓰세요. 이미 받은 도장은 그대로예요.</p>', okText: '해임', danger: true });
+    if (!ok) return;
+    try { setData(await call('adminDismissSpy', S.token, row)); toast('해임했어요.'); } catch (e) { toast(e.message, true); }
+  }
+
   function renderManual() {
     const d = S.data;
     const valid = new Set(d.students.map((s) => s.no));
@@ -2131,7 +2464,7 @@ const HTML_SOURCES = {
   function switchTab(tab) {
     S.tab = tab;
     document.querySelectorAll('#tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-    ['overview', 'quest', 'praise', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
+    ['overview', 'quest', 'praise', 'spy', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
   }
 
   async function submitManual() {
@@ -2202,6 +2535,13 @@ const HTML_SOURCES = {
   $('lockBtn').onclick = toggleLock;
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
+  $('spyBtn').onclick = appointSpy;
+  $('spyHist').onclick = (e) => { const b = e.target.closest('[data-dismiss]'); if (b) dismissSpy(Number(b.dataset.dismiss)); };
+  $('spyWeeks').onclick = (e) => {
+    const a = e.target.closest('[data-week]'); if (!a) return; e.preventDefault();
+    const w = S.data.spy.weeks.find((x) => String(x.week) === a.dataset.week);
+    if (w) { $('spyStart').value = w.start; $('spyEnd').value = w.end; }
+  };
   $('tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); };
   $('studentChips').onclick = (e) => {
     const b = e.target.closest('[data-no]');
@@ -2396,6 +2736,18 @@ const HTML_SOURCES = {
     .thanks { appearance: none; font: inherit; cursor: pointer; border: 0; border-radius: 999px; padding: 6px 14px; background: #ff7aa8; color: #fff; font-weight: 700; }
     .thanks:disabled { background: #e8c6d3; color: #8a5b6c; cursor: default; }
 
+    /* 암행어사 */
+    .spybox { border-color: #b18cff; box-shadow: 0 0 18px #8b5cf655; background: linear-gradient(180deg, #2a1650, #160c33); }
+    .spybox h2 { color: #d9c4ff; }
+    .secret { display: inline-block; font-size: 12px; background: #b18cff; color: #1a0b38; border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+    .jrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .jrow .rk { flex: 0 0 92px; font-weight: 900; }
+    .jrow .rk.good { color: var(--sky); } .jrow .rk.bad { color: var(--red); }
+    .result { text-align: center; padding: 14px 8px; border-radius: 12px; font-size: 18px; font-weight: 900; }
+    .result.ok { background: #1a9b4b33; color: #b8f5cf; border: 1px solid #1a9b4b; }
+    .result.no { background: #20314f; color: var(--muted); }
+    .news { background: #ffd23f1a; border: 1px solid #ffd23f55; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
+
     .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .topbar .hi { flex: 1; font-weight: 700; }
     .topbar .hi b { color: var(--yellow); }
@@ -2431,6 +2783,9 @@ const HTML_SOURCES = {
 
     <!-- 랭킹 -->
     <div class="box" id="rankBox"></div>
+
+    <!-- 암행어사 임무 (본인이 암행어사일 때만 서버가 내려줌) -->
+    <div class="box spybox hidden" id="spyBox"></div>
 
     <!-- 오늘의 시간표 + 퀘스트 -->
     <div class="box" id="questBox">
@@ -2510,6 +2865,13 @@ const HTML_SOURCES = {
       </table>
     </div>
 
+    <!-- 암행어사 지목 -->
+    <div class="box" id="accuseBox">
+      <h2 class="title-font">🔍 욕설 암행어사를 찾아라!</h2>
+      <div id="accuseBody"></div>
+      <div id="newsBox"></div>
+    </div>
+
     <!-- 받은 칭찬함 -->
     <div class="box">
       <h2 class="title-font">💌 받은 칭찬함</h2>
@@ -2536,9 +2898,10 @@ const HTML_SOURCES = {
 </div>
 
 <div id="toast"></div>
+<div id="modal-root"></div>
 
 <script>
-  const S = { token: null, data: null, lastTotal: null, busy: false, acting: false, seq: 0, appliedSeq: 0, praiseTo: '' };
+  const S = { accuseTo: '', judge: {}, token: null, data: null, lastTotal: null, busy: false, acting: false, seq: 0, appliedSeq: 0, praiseTo: '' };
   const $ = (id) => document.getElementById(id);
   const WD = ['일', '월', '화', '수', '목', '금', '토'];
   const PLANET_ROWS = [3, 5, 6, 5, 4]; // 종이 도장판과 같은 23칸
@@ -2638,6 +3001,7 @@ const HTML_SOURCES = {
     renderSigns(d);
     renderRecords(d);
     renderInbox(d);
+    renderSpy(d);
     $('stamp').textContent = \`마지막 갱신 \${d.serverTime} · 30초마다 자동 갱신\`;
   }
 
@@ -2808,6 +3172,82 @@ const HTML_SOURCES = {
     const n = $('praiseText').value.replace(/\\s/g, '').length;
     $('praiseCount').textContent = \`\${n}자 / 최소 \${d.praiseMinLength}자\`;
     $('praiseCount').style.color = n >= d.praiseMinLength ? 'var(--green)' : '';
+  }
+
+  function options(list, sel, placeholder) {
+    return \`<option value="">\${placeholder}</option>\` + list.map((f) => \`<option value="\${esc(f.no)}" \${sel === f.no ? 'selected' : ''}>\${esc(f.name)}</option>\`).join('');
+  }
+
+  function renderSpy(d) {
+    // 암행어사 임무
+    const m = d.spy.mission;
+    $('spyBox').classList.toggle('hidden', !m);
+    if (m && !$('spyBox').contains(document.activeElement)) {
+      const head = \`<h2 class="title-font">🕵️ 암행어사 임무 <span class="secret">나만 보여요 · 비밀!</span></h2>
+        <p class="muted" style="margin:0">임기: \${md(m.start)} ~ \${md(m.end)} · 친구들에게 정체를 들키지 않게 조심!</p>\`;
+      if (!m.isSchoolDay) $('spyBox').innerHTML = head + '<p>오늘은 등교일이 아니라 판정이 없어요.</p>';
+      else if (m.judgedToday) $('spyBox').innerHTML = head + \`<div class="stamp-done">✅ 오늘 판정 완료! (활동 보상 +\${m.reward})</div>\`;
+      else {
+        const rows = (kind, label, scores) => [0, 1, 2].map((i) => \`<div class="jrow"><span class="rk \${kind}">\${label} \${i + 1}위 <small>(\${scores[i]})</small></span>
+          <select data-j="\${kind}\${i}">\${options(d.friends, S.judge[kind + i] || '', kind === 'good' ? '친구 선택 (필수)' : '없음')}</select></div>\`).join('');
+        $('spyBox').innerHTML = head + \`<h3>😊 바른 언어 TOP 3</h3>\${rows('good', '바른', ['+5', '+3', '+1'])}
+          <h3>🤬 나쁜 언어 TOP 3 <small class="muted">(없으면 비워도 돼요)</small></h3>\${rows('bad', '나쁜', ['−5', '−3', '−1'])}
+          <button class="btn yellow block" style="margin-top:12px" id="judgeBtn">판정 제출하기 (활동 보상 +\${m.reward})</button>\`;
+        $('judgeBtn').onclick = submitJudge;
+        $('spyBox').onchange = (e) => { if (e.target.dataset.j) S.judge[e.target.dataset.j] = e.target.value; };
+      }
+    }
+
+    // 지목
+    const a = d.spy.accuse;
+    if (a.used) {
+      $('accuseBody').innerHTML = \`<p class="muted" style="margin-top:0">지목 기회: <b>사용함</b> (\${md(a.date)} · \${esc(a.targetName)})</p>\` +
+        (a.success
+          ? \`<div class="result ok">🎉 검거 성공! 암행어사 활동 보상 \${a.moved}개를 가져왔어요!</div>\`
+          : '<div class="result no">아쉽지만 암행어사가 아니었어요.</div>');
+    } else if (!$('accuseBody').contains(document.activeElement)) {
+      $('accuseBody').innerHTML = \`<p style="margin-top:0">누가 몰래 우리 반 언어를 지켜보고 있을까요? 🕵️<br>
+          <b class="yellow">기간 중 딱 1번</b> 지목할 수 있어요. 맞히면 암행어사가 받은 활동 보상 도장을 모두 가져와요!</p>
+        <p class="muted">지목 기회: <b class="plus">1번 남음</b> · 틀려도 벌점은 없어요.</p>
+        <select id="accuseSel">\${options(d.friends, S.accuseTo, '암행어사라고 생각하는 친구')}</select>
+        <button class="btn danger block" style="margin-top:8px" id="accuseBtn">🔍 지목하기</button>\`;
+      $('accuseSel').onchange = (e) => (S.accuseTo = e.target.value);
+      $('accuseBtn').onclick = submitAccuse;
+    }
+    $('newsBox').innerHTML = d.spy.news.length
+      ? '<h3>📰 검거 소식</h3>' + d.spy.news.map((n) => \`<div class="news">🚨 \${md(n.date)} <b>\${esc(n.accuser)}</b>이(가) 암행어사 <b>\${esc(n.spy)}</b>을(를) 검거! (도장 \${n.moved}개 이동)</div>\`).join('')
+      : '';
+  }
+
+  function confirmBox(title, html, okText) {
+    return new Promise((resolve) => {
+      const root = $('modal-root');
+      root.innerHTML = \`<div class="modal-bg"><div class="modal"><div class="box"><h2 class="title-font">\${esc(title)}</h2>\${html}
+        <div class="row" style="margin-top:14px"><button class="btn ghost" id="m-no">취소</button><button class="btn yellow" id="m-ok">\${esc(okText)}</button></div></div></div></div>\`;
+      $('m-no').onclick = () => { root.innerHTML = ''; resolve(false); };
+      $('m-ok').onclick = () => { root.innerHTML = ''; resolve(true); };
+    });
+  }
+
+  async function submitJudge() {
+    const pick = (k) => [0, 1, 2].map((i) => document.querySelector(\`[data-j="\${k}\${i}"]\`).value);
+    const good = pick('good'), badAll = pick('bad');
+    if (good.some((x) => !x)) return toast('바른 언어 1·2·3위를 모두 골라 주세요.', true);
+    const bad = badAll.filter(Boolean);
+    if (badAll.findIndex((x) => !x) >= 0 && badAll.slice(badAll.findIndex((x) => !x)).some(Boolean)) return toast('나쁜 언어는 1위부터 순서대로 골라 주세요.', true);
+    const all = good.concat(bad);
+    if (new Set(all).size !== all.length) return toast('한 친구를 두 번 고를 수 없어요.', true);
+    const nm = (no) => (S.data.friends.find((f) => f.no === no) || {}).name || no;
+    const ok = await confirmBox('오늘 판정 제출', \`<p>😊 \${good.map(nm).map(esc).join(', ')}</p><p>🤬 \${bad.length ? bad.map(nm).map(esc).join(', ') : '없음'}</p><p class="muted">제출하면 바꿀 수 없어요.</p>\`, '제출');
+    if (ok && (await act('spyJudge', good, bad))) S.judge = {};
+  }
+
+  async function submitAccuse() {
+    const no = $('accuseSel').value;
+    if (!no) return toast('지목할 친구를 골라 주세요.', true);
+    const name = (S.data.friends.find((f) => f.no === no) || {}).name || '';
+    const ok = await confirmBox('정말 지목할까요?', \`<p style="font-size:20px;text-align:center"><b class="yellow">\${esc(name)}</b></p><p>지목 기회는 <b>기간 중 1번</b>뿐이에요. 되돌릴 수 없어요!</p>\`, '지목하기');
+    if (ok) act('accuseSpy', no);
   }
 
   function renderInbox(d) {

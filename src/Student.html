@@ -136,6 +136,18 @@
     .thanks { appearance: none; font: inherit; cursor: pointer; border: 0; border-radius: 999px; padding: 6px 14px; background: #ff7aa8; color: #fff; font-weight: 700; }
     .thanks:disabled { background: #e8c6d3; color: #8a5b6c; cursor: default; }
 
+    /* 암행어사 */
+    .spybox { border-color: #b18cff; box-shadow: 0 0 18px #8b5cf655; background: linear-gradient(180deg, #2a1650, #160c33); }
+    .spybox h2 { color: #d9c4ff; }
+    .secret { display: inline-block; font-size: 12px; background: #b18cff; color: #1a0b38; border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+    .jrow { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+    .jrow .rk { flex: 0 0 92px; font-weight: 900; }
+    .jrow .rk.good { color: var(--sky); } .jrow .rk.bad { color: var(--red); }
+    .result { text-align: center; padding: 14px 8px; border-radius: 12px; font-size: 18px; font-weight: 900; }
+    .result.ok { background: #1a9b4b33; color: #b8f5cf; border: 1px solid #1a9b4b; }
+    .result.no { background: #20314f; color: var(--muted); }
+    .news { background: #ffd23f1a; border: 1px solid #ffd23f55; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
+
     .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .topbar .hi { flex: 1; font-weight: 700; }
     .topbar .hi b { color: var(--yellow); }
@@ -171,6 +183,9 @@
 
     <!-- 랭킹 -->
     <div class="box" id="rankBox"></div>
+
+    <!-- 암행어사 임무 (본인이 암행어사일 때만 서버가 내려줌) -->
+    <div class="box spybox hidden" id="spyBox"></div>
 
     <!-- 오늘의 시간표 + 퀘스트 -->
     <div class="box" id="questBox">
@@ -250,6 +265,13 @@
       </table>
     </div>
 
+    <!-- 암행어사 지목 -->
+    <div class="box" id="accuseBox">
+      <h2 class="title-font">🔍 욕설 암행어사를 찾아라!</h2>
+      <div id="accuseBody"></div>
+      <div id="newsBox"></div>
+    </div>
+
     <!-- 받은 칭찬함 -->
     <div class="box">
       <h2 class="title-font">💌 받은 칭찬함</h2>
@@ -276,9 +298,10 @@
 </div>
 
 <div id="toast"></div>
+<div id="modal-root"></div>
 
 <script>
-  const S = { token: null, data: null, lastTotal: null, busy: false, acting: false, seq: 0, appliedSeq: 0, praiseTo: '' };
+  const S = { accuseTo: '', judge: {}, token: null, data: null, lastTotal: null, busy: false, acting: false, seq: 0, appliedSeq: 0, praiseTo: '' };
   const $ = (id) => document.getElementById(id);
   const WD = ['일', '월', '화', '수', '목', '금', '토'];
   const PLANET_ROWS = [3, 5, 6, 5, 4]; // 종이 도장판과 같은 23칸
@@ -378,6 +401,7 @@
     renderSigns(d);
     renderRecords(d);
     renderInbox(d);
+    renderSpy(d);
     $('stamp').textContent = `마지막 갱신 ${d.serverTime} · 30초마다 자동 갱신`;
   }
 
@@ -548,6 +572,82 @@
     const n = $('praiseText').value.replace(/\s/g, '').length;
     $('praiseCount').textContent = `${n}자 / 최소 ${d.praiseMinLength}자`;
     $('praiseCount').style.color = n >= d.praiseMinLength ? 'var(--green)' : '';
+  }
+
+  function options(list, sel, placeholder) {
+    return `<option value="">${placeholder}</option>` + list.map((f) => `<option value="${esc(f.no)}" ${sel === f.no ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
+  }
+
+  function renderSpy(d) {
+    // 암행어사 임무
+    const m = d.spy.mission;
+    $('spyBox').classList.toggle('hidden', !m);
+    if (m && !$('spyBox').contains(document.activeElement)) {
+      const head = `<h2 class="title-font">🕵️ 암행어사 임무 <span class="secret">나만 보여요 · 비밀!</span></h2>
+        <p class="muted" style="margin:0">임기: ${md(m.start)} ~ ${md(m.end)} · 친구들에게 정체를 들키지 않게 조심!</p>`;
+      if (!m.isSchoolDay) $('spyBox').innerHTML = head + '<p>오늘은 등교일이 아니라 판정이 없어요.</p>';
+      else if (m.judgedToday) $('spyBox').innerHTML = head + `<div class="stamp-done">✅ 오늘 판정 완료! (활동 보상 +${m.reward})</div>`;
+      else {
+        const rows = (kind, label, scores) => [0, 1, 2].map((i) => `<div class="jrow"><span class="rk ${kind}">${label} ${i + 1}위 <small>(${scores[i]})</small></span>
+          <select data-j="${kind}${i}">${options(d.friends, S.judge[kind + i] || '', kind === 'good' ? '친구 선택 (필수)' : '없음')}</select></div>`).join('');
+        $('spyBox').innerHTML = head + `<h3>😊 바른 언어 TOP 3</h3>${rows('good', '바른', ['+5', '+3', '+1'])}
+          <h3>🤬 나쁜 언어 TOP 3 <small class="muted">(없으면 비워도 돼요)</small></h3>${rows('bad', '나쁜', ['−5', '−3', '−1'])}
+          <button class="btn yellow block" style="margin-top:12px" id="judgeBtn">판정 제출하기 (활동 보상 +${m.reward})</button>`;
+        $('judgeBtn').onclick = submitJudge;
+        $('spyBox').onchange = (e) => { if (e.target.dataset.j) S.judge[e.target.dataset.j] = e.target.value; };
+      }
+    }
+
+    // 지목
+    const a = d.spy.accuse;
+    if (a.used) {
+      $('accuseBody').innerHTML = `<p class="muted" style="margin-top:0">지목 기회: <b>사용함</b> (${md(a.date)} · ${esc(a.targetName)})</p>` +
+        (a.success
+          ? `<div class="result ok">🎉 검거 성공! 암행어사 활동 보상 ${a.moved}개를 가져왔어요!</div>`
+          : '<div class="result no">아쉽지만 암행어사가 아니었어요.</div>');
+    } else if (!$('accuseBody').contains(document.activeElement)) {
+      $('accuseBody').innerHTML = `<p style="margin-top:0">누가 몰래 우리 반 언어를 지켜보고 있을까요? 🕵️<br>
+          <b class="yellow">기간 중 딱 1번</b> 지목할 수 있어요. 맞히면 암행어사가 받은 활동 보상 도장을 모두 가져와요!</p>
+        <p class="muted">지목 기회: <b class="plus">1번 남음</b> · 틀려도 벌점은 없어요.</p>
+        <select id="accuseSel">${options(d.friends, S.accuseTo, '암행어사라고 생각하는 친구')}</select>
+        <button class="btn danger block" style="margin-top:8px" id="accuseBtn">🔍 지목하기</button>`;
+      $('accuseSel').onchange = (e) => (S.accuseTo = e.target.value);
+      $('accuseBtn').onclick = submitAccuse;
+    }
+    $('newsBox').innerHTML = d.spy.news.length
+      ? '<h3>📰 검거 소식</h3>' + d.spy.news.map((n) => `<div class="news">🚨 ${md(n.date)} <b>${esc(n.accuser)}</b>이(가) 암행어사 <b>${esc(n.spy)}</b>을(를) 검거! (도장 ${n.moved}개 이동)</div>`).join('')
+      : '';
+  }
+
+  function confirmBox(title, html, okText) {
+    return new Promise((resolve) => {
+      const root = $('modal-root');
+      root.innerHTML = `<div class="modal-bg"><div class="modal"><div class="box"><h2 class="title-font">${esc(title)}</h2>${html}
+        <div class="row" style="margin-top:14px"><button class="btn ghost" id="m-no">취소</button><button class="btn yellow" id="m-ok">${esc(okText)}</button></div></div></div></div>`;
+      $('m-no').onclick = () => { root.innerHTML = ''; resolve(false); };
+      $('m-ok').onclick = () => { root.innerHTML = ''; resolve(true); };
+    });
+  }
+
+  async function submitJudge() {
+    const pick = (k) => [0, 1, 2].map((i) => document.querySelector(`[data-j="${k}${i}"]`).value);
+    const good = pick('good'), badAll = pick('bad');
+    if (good.some((x) => !x)) return toast('바른 언어 1·2·3위를 모두 골라 주세요.', true);
+    const bad = badAll.filter(Boolean);
+    if (badAll.findIndex((x) => !x) >= 0 && badAll.slice(badAll.findIndex((x) => !x)).some(Boolean)) return toast('나쁜 언어는 1위부터 순서대로 골라 주세요.', true);
+    const all = good.concat(bad);
+    if (new Set(all).size !== all.length) return toast('한 친구를 두 번 고를 수 없어요.', true);
+    const nm = (no) => (S.data.friends.find((f) => f.no === no) || {}).name || no;
+    const ok = await confirmBox('오늘 판정 제출', `<p>😊 ${good.map(nm).map(esc).join(', ')}</p><p>🤬 ${bad.length ? bad.map(nm).map(esc).join(', ') : '없음'}</p><p class="muted">제출하면 바꿀 수 없어요.</p>`, '제출');
+    if (ok && (await act('spyJudge', good, bad))) S.judge = {};
+  }
+
+  async function submitAccuse() {
+    const no = $('accuseSel').value;
+    if (!no) return toast('지목할 친구를 골라 주세요.', true);
+    const name = (S.data.friends.find((f) => f.no === no) || {}).name || '';
+    const ok = await confirmBox('정말 지목할까요?', `<p style="font-size:20px;text-align:center"><b class="yellow">${esc(name)}</b></p><p>지목 기회는 <b>기간 중 1번</b>뿐이에요. 되돌릴 수 없어요!</p>`, '지목하기');
+    if (ok) act('accuseSpy', no);
   }
 
   function renderInbox(d) {

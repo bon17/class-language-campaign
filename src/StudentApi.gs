@@ -146,6 +146,7 @@ function buildStudentHome_(me) {
     teachers: cfg.teacherList.map((t) => t.name),
     praiseMinLength: cfg.praiseMinLength,
     inbox: hist.inbox,
+    spy: spyHomeFor_(me, today),
     serverTime: Utilities.formatDate(new Date(), TZ, 'HH:mm:ss'),
   };
 }
