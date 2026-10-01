@@ -78,6 +78,14 @@
 
     <!-- 수동 도장 -->
     <div id="tab-manual" class="box hidden" style="margin-top:0">
+      <h2 class="title-font">🤝 반 전체 단체 도장 +3</h2>
+      <p class="muted">단체 도장판 싸인 등 반 전체가 함께 받는 도장이에요. 모든 투투에게 "단체 +3"이 기록됩니다.</p>
+      <div class="row">
+        <input id="gDate" type="date" style="flex:0 1 180px">
+        <input id="gMemo" type="text" maxlength="200" placeholder="메모 (예: 단체 도장판 싸인 완성)" class="grow">
+      </div>
+      <button class="btn yellow block" style="margin-top:10px" id="groupBtn">🤝 반 전체에게 +3</button>
+      <div class="neon-line"></div>
       <h2 class="title-font">수동 도장 추가 / 차감</h2>
       <p class="muted">기록장에 "수동"으로 한 줄씩 남습니다. 잘못 넣은 도장은 기록장 탭에서 취소하세요.</p>
       <label>대상 선택</label>
@@ -234,6 +242,7 @@
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
     if (!$('mDate').value) $('mDate').value = d.today;
+    if (!$('gDate').value) $('gDate').value = d.today;
     render();
   }
 
@@ -405,6 +414,16 @@
     } catch (e) { toast(e.message, true); }
   }
 
+  async function groupStamp() {
+    const d = S.data, date = $('gDate').value, memo = $('gMemo').value.trim();
+    const ok = await modal({ title: '반 전체 단체 도장',
+      html: `<p><b class="plus" style="font-size:20px">+3</b> · ${esc(date)}</p><p>${esc(d.cfg.nickname)} 전원 ${d.students.length}명</p>${memo ? `<p class="muted">메모: ${esc(memo)}</p>` : ''}`,
+      okText: '전원에게 +3' });
+    if (!ok) return;
+    try { setData(await call('adminGroupStamp', S.token, { date, memo })); $('gMemo').value = ''; toast(`${d.students.length}명에게 단체 +3 기록했어요.`); }
+    catch (e) { toast(e.message, true); }
+  }
+
   async function cancelRecord(id) {
     const r = S.data.ledger.find((x) => x.id === id);
     if (!r) return;
@@ -439,6 +458,7 @@
   $('sortBtn').onclick = () => { S.sort = S.sort === 'rank' ? 'no' : 'rank'; renderOverview(); };
   $('lockBtn').onclick = toggleLock;
   $('manualBtn').onclick = submitManual;
+  $('groupBtn').onclick = groupStamp;
   $('tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); };
   $('studentChips').onclick = (e) => {
     const b = e.target.closest('[data-no]');

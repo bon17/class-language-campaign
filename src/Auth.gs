@@ -122,3 +122,27 @@ function requireStudent_(token) {
   if (!s || !s.code || codeFingerprint_(s.code) !== p.f) throw new Error('AUTH: 로그인 코드가 바뀌었어요. 새 코드로 다시 로그인해 주세요.');
   return { no: s.no, name: s.name };
 }
+
+// ---------- 교과 선생님 태블릿 (서명 토큰) ----------
+
+/** 공통 코드로 태블릿 잠금 해제. 설정의 코드가 바뀌면 기존 태블릿은 다시 잠긴다. */
+function loginTeacherDevice_(code) {
+  checkLoginRate_('teacher');
+  const cfg = getConfig();
+  if (!cfg.teacherCode) throw new Error('교과 선생님 코드가 설정되지 않았어요. 담임 선생님께 알려 주세요.');
+  if (String(code || '').trim() !== cfg.teacherCode) {
+    recordLoginFail_('teacher');
+    throw new Error('코드가 맞지 않아요.');
+  }
+  const end = cfg.endDate ? new Date(cfg.endDate + 'T23:59:59+09:00').getTime() : Date.now();
+  return signToken_({ r: 't', f: codeFingerprint_(cfg.teacherCode), exp: Math.max(end, Date.now()) + 14 * 86400000 });
+}
+
+function requireTeacher_(token) {
+  const p = verifySignedToken_(token);
+  const cfg = getConfig();
+  if (!p || p.r !== 't' || !cfg.teacherCode || p.f !== codeFingerprint_(cfg.teacherCode)) {
+    throw new Error('AUTH: 태블릿 잠금이 풀려 있지 않아요. 공통 코드를 입력해 주세요.');
+  }
+  return true;
+}

@@ -942,6 +942,30 @@ function requireStudent_(token) {
   return { no: s.no, name: s.name };
 }
 
+// ---------- 교과 선생님 태블릿 (서명 토큰) ----------
+
+/** 공통 코드로 태블릿 잠금 해제. 설정의 코드가 바뀌면 기존 태블릿은 다시 잠긴다. */
+function loginTeacherDevice_(code) {
+  checkLoginRate_('teacher');
+  const cfg = getConfig();
+  if (!cfg.teacherCode) throw new Error('교과 선생님 코드가 설정되지 않았어요. 담임 선생님께 알려 주세요.');
+  if (String(code || '').trim() !== cfg.teacherCode) {
+    recordLoginFail_('teacher');
+    throw new Error('코드가 맞지 않아요.');
+  }
+  const end = cfg.endDate ? new Date(cfg.endDate + 'T23:59:59+09:00').getTime() : Date.now();
+  return signToken_({ r: 't', f: codeFingerprint_(cfg.teacherCode), exp: Math.max(end, Date.now()) + 14 * 86400000 });
+}
+
+function requireTeacher_(token) {
+  const p = verifySignedToken_(token);
+  const cfg = getConfig();
+  if (!p || p.r !== 't' || !cfg.teacherCode || p.f !== codeFingerprint_(cfg.teacherCode)) {
+    throw new Error('AUTH: 태블릿 잠금이 풀려 있지 않아요. 공통 코드를 입력해 주세요.');
+  }
+  return true;
+}
+
 // ===================== Setup.gs =====================
 /**
  * 스프레드시트 메뉴, 시트 초기 세팅, 로그인 코드 발급.
@@ -1316,6 +1340,153 @@ function buildStudentHome_(me) {
   };
 }
 
+// ===================== TeacherApi.gs =====================
+/**
+ * 미션3: 교과 선생님 화면 (교실 태블릿).
+ * - 공통 코드로 태블릿 잠금 해제(기간 동안 유지) → 선생님 이름 → 교시(현재 시각 자동 선택) → 투투 이름 → +2 / MVP +3
+ * - 적극 참여 +2: 같은 날·같은 교시에 한 투투 1번 / MVP +3: 같은 날·같은 교시에 1명
+ * - 이번 교시 기록은 되돌리기 가능 (기록장에서 취소 처리)
+ */
+
+const CLASS_MISSIONS = ['수업참여', 'MVP'];
+const RECENT_DAYS_FOR_HINT = 3; // "최근 도장이 적은 투투" 표시 기준 등교일 수
+
+function teacherUnlock(code) {
+  return { token: loginTeacherDevice_(code) };
+}
+
+/** 첫 화면: 선생님 목록, 오늘 시간표, 지금 교시 */
+function teacherInit(token) {
+  requireTeacher_(token);
+  ensureSchema_();
+  const cfg = getConfig();
+  const today = todayStr_();
+  const now = Utilities.formatDate(new Date(), TZ, 'HH:mm');
+  const cur = currentPeriod_(today, now);
+  const tt = timetableFor_(today);
+  const maxPeriod = Math.max(cfg.periodCount, ...tt.map((p) => p.period), 1);
+  return {
+    today,
+    isSchoolDay: cfg.schoolDays.indexOf(today) >= 0,
+    nickname: cfg.nickname,
+    teachers: cfg.teacherList,
+    periods: Array.from({ length: maxPeriod }, (_, i) => {
+      const p = tt.find((x) => x.period === i + 1);
+      return { period: i + 1, subject: p ? p.subject : '', start: p ? p.start : '' };
+    }),
+    suggestedPeriod: cur ? cur.period : null,
+    now,
+  };
+}
+
+function checkTeacherInput_(teacherName, period) {
+  const cfg = getConfig();
+  const today = todayStr_();
+  if (cfg.schoolDays.indexOf(today) < 0) throw new Error('오늘은 캠페인 등교일이 아니에요.');
+  const name = String(teacherName || '').replace(/\s+/g, ' ').trim();
+  if (!name || name.length > 20) throw new Error('선생님 이름을 다시 선택해 주세요.');
+  const p = parseInt(period, 10);
+  if (!(p >= 1 && p <= 10)) throw new Error('교시를 다시 선택해 주세요.');
+  const t = cfg.teacherList.find((x) => x.name === name);
+  const ttp = timetableFor_(today).find((x) => x.period === p);
+  const subject = (t && t.subject) || (ttp && ttp.subject) || '';
+  return { today, name, period: p, subject };
+}
+
+/** 수업 화면 데이터: 투투 목록(오늘 받음 ✓, 최근 적음 표시), 이번 교시 기록, MVP */
+function teacherSession(token, teacherName, period) {
+  requireTeacher_(token);
+  const ctx = checkTeacherInput_(teacherName, period);
+  return buildTeacherSession_(ctx);
+}
+
+function buildTeacherSession_(ctx, lastId) {
+  const cfg = getConfig();
+  const students = getStudentsCached_();
+  const nameOf = {};
+  students.forEach((s) => (nameOf[s.no] = s.name));
+  const records = readLedger_().filter((r) => !r.cancelled && CLASS_MISSIONS.indexOf(r.mission) >= 0);
+
+  const recentDays = cfg.schoolDays.filter((d) => d <= ctx.today).slice(-RECENT_DAYS_FOR_HINT);
+  const recentCount = {};
+  const todayGot = {};
+  students.forEach((s) => (recentCount[s.no] = 0));
+  records.forEach((r) => {
+    if (recentDays.indexOf(r.date) >= 0 && recentCount[r.no] !== undefined) recentCount[r.no]++;
+    if (r.date === ctx.today) todayGot[r.no] = true;
+  });
+  const counts = Object.values(recentCount);
+  const min = counts.length ? Math.min(...counts) : 0;
+  const max = counts.length ? Math.max(...counts) : 0;
+
+  const here = records.filter((r) => r.date === ctx.today && String(r.period) === String(ctx.period));
+  const mvp = here.find((r) => r.mission === 'MVP');
+  return {
+    teacher: ctx.name,
+    subject: ctx.subject,
+    period: ctx.period,
+    today: ctx.today,
+    nickname: cfg.nickname,
+    students: students.map((s) => ({
+      no: s.no,
+      name: s.name,
+      todayGot: !!todayGot[s.no],
+      low: max > min && recentCount[s.no] === min, // 모두 같으면 표시 안 함
+      classDone: here.some((r) => r.no === s.no && r.mission === '수업참여'),
+      isMvp: !!mvp && mvp.no === s.no,
+    })),
+    mvp: mvp ? { no: mvp.no, name: nameOf[mvp.no] || mvp.no, by: mvp.inputBy } : null,
+    log: here.slice().reverse().map((r) => ({
+      id: r.id, no: r.no, name: nameOf[r.no] || r.no, mission: r.mission, score: r.score, by: r.inputBy, ts: String(r.ts).slice(11, 16),
+    })),
+    lastId: lastId || null,
+  };
+}
+
+/** kind: 'class'(적극 참여 +2) | 'mvp'(MVP +3) */
+function teacherStamp(token, teacherName, period, no, kind) {
+  requireTeacher_(token);
+  const ctx = checkTeacherInput_(teacherName, period);
+  const target = String(no || '').trim();
+  const s = getStudentsCached_().find((x) => x.no === target);
+  if (!s) throw new Error('없는 투투예요.');
+  if (kind !== 'class' && kind !== 'mvp') throw new Error('도장 종류를 다시 골라 주세요.');
+
+  const id = withLock_(() => {
+    const here = readLedger_().filter((r) => !r.cancelled && r.date === ctx.today && String(r.period) === String(ctx.period));
+    if (kind === 'class' && here.some((r) => r.mission === '수업참여' && r.no === target)) {
+      throw new Error(`${s.name}: 이번 교시에 이미 적극 참여 +2를 받았어요.`);
+    }
+    if (kind === 'mvp') {
+      const m = here.find((r) => r.mission === 'MVP');
+      if (m) {
+        const mName = (getStudentsCached_().find((x) => x.no === m.no) || {}).name || m.no;
+        throw new Error(`오늘 ${ctx.period}교시 MVP는 이미 뽑혔어요. (MVP: ${mName})`);
+      }
+    }
+    return appendRecords_([{
+      date: ctx.today, no: target,
+      mission: kind === 'mvp' ? 'MVP' : '수업참여',
+      score: kind === 'mvp' ? 3 : 2,
+      inputType: '교과', inputBy: ctx.name, period: String(ctx.period), subject: ctx.subject,
+    }])[0];
+  });
+  return buildTeacherSession_(ctx, id);
+}
+
+/** 오늘 교과 화면에서 넣은 도장 되돌리기 */
+function teacherUndo(token, teacherName, period, id) {
+  requireTeacher_(token);
+  const ctx = checkTeacherInput_(teacherName, period);
+  const r = readLedger_().find((x) => x.id === String(id));
+  if (!r || r.cancelled) throw new Error('되돌릴 기록이 없어요.');
+  if (r.date !== ctx.today || r.inputType !== '교과' || CLASS_MISSIONS.indexOf(r.mission) < 0) {
+    throw new Error('오늘 수업 도장만 되돌릴 수 있어요.');
+  }
+  cancelRecord_(r.id, '교과 화면 되돌리기', ctx.name);
+  return buildTeacherSession_(ctx);
+}
+
 // ===================== AdminApi.gs =====================
 /**
  * 담임 대시보드 서버 함수. 로그인 외 모든 함수는 담임 토큰을 검증한다.
@@ -1362,6 +1533,20 @@ function adminAddManual(token, payload) {
   appendRecords_(nos.map((no) => ({
     date, no, mission: '수동', score, inputType: '담임', inputBy: '담임', memo: reason,
   })));
+  return buildAdminDashboard_();
+}
+
+/** 반 전체 단체 도장 +3. payload: {date, memo} */
+function adminGroupStamp(token, payload) {
+  requireAdmin_(token);
+  const p = payload || {};
+  const date = toDateStr_(p.date || todayStr_());
+  const memo = String(p.memo || '').trim() || '단체 도장';
+  if (!date) throw new Error('날짜 형식이 올바르지 않아요.');
+  if (memo.length > 200) throw new Error('메모는 200자 이내로 입력해 주세요.');
+  const students = readStudents_();
+  if (!students.length) throw new Error('학생 명단이 비어 있어요.');
+  appendRecords_(students.map((s) => ({ date, no: s.no, mission: '단체', score: 3, inputType: '담임', inputBy: '담임', memo })));
   return buildAdminDashboard_();
 }
 
@@ -1473,13 +1658,13 @@ function buildAdminDashboard_() {
 /**
  * 웹앱 진입점.
  *   (기본)          투투 화면
- *   ?page=teacher   교과 선생님 화면  — 4단계에서 추가
+ *   ?page=teacher   교과 선생님 화면 (교실 태블릿)
  *   ?page=admin     담임 대시보드
  */
 function doGet(e) {
   const page = (e && e.parameter && e.parameter.page) || '';
   const cfg = getConfig();
-  const files = { '': 'Student', admin: 'Admin' };
+  const files = { '': 'Student', admin: 'Admin', teacher: 'Teacher' };
   const file = files[page] || 'ComingSoon';
 
   const t = HtmlService.createTemplate(htmlSource_(file));
@@ -1596,6 +1781,14 @@ const HTML_SOURCES = {
 
     <!-- 수동 도장 -->
     <div id="tab-manual" class="box hidden" style="margin-top:0">
+      <h2 class="title-font">🤝 반 전체 단체 도장 +3</h2>
+      <p class="muted">단체 도장판 싸인 등 반 전체가 함께 받는 도장이에요. 모든 투투에게 "단체 +3"이 기록됩니다.</p>
+      <div class="row">
+        <input id="gDate" type="date" style="flex:0 1 180px">
+        <input id="gMemo" type="text" maxlength="200" placeholder="메모 (예: 단체 도장판 싸인 완성)" class="grow">
+      </div>
+      <button class="btn yellow block" style="margin-top:10px" id="groupBtn">🤝 반 전체에게 +3</button>
+      <div class="neon-line"></div>
       <h2 class="title-font">수동 도장 추가 / 차감</h2>
       <p class="muted">기록장에 "수동"으로 한 줄씩 남습니다. 잘못 넣은 도장은 기록장 탭에서 취소하세요.</p>
       <label>대상 선택</label>
@@ -1752,6 +1945,7 @@ const HTML_SOURCES = {
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
     if (!$('mDate').value) $('mDate').value = d.today;
+    if (!$('gDate').value) $('gDate').value = d.today;
     render();
   }
 
@@ -1923,6 +2117,16 @@ const HTML_SOURCES = {
     } catch (e) { toast(e.message, true); }
   }
 
+  async function groupStamp() {
+    const d = S.data, date = $('gDate').value, memo = $('gMemo').value.trim();
+    const ok = await modal({ title: '반 전체 단체 도장',
+      html: \`<p><b class="plus" style="font-size:20px">+3</b> · \${esc(date)}</p><p>\${esc(d.cfg.nickname)} 전원 \${d.students.length}명</p>\${memo ? \`<p class="muted">메모: \${esc(memo)}</p>\` : ''}\`,
+      okText: '전원에게 +3' });
+    if (!ok) return;
+    try { setData(await call('adminGroupStamp', S.token, { date, memo })); $('gMemo').value = ''; toast(\`\${d.students.length}명에게 단체 +3 기록했어요.\`); }
+    catch (e) { toast(e.message, true); }
+  }
+
   async function cancelRecord(id) {
     const r = S.data.ledger.find((x) => x.id === id);
     if (!r) return;
@@ -1957,6 +2161,7 @@ const HTML_SOURCES = {
   $('sortBtn').onclick = () => { S.sort = S.sort === 'rank' ? 'no' : 'rank'; renderOverview(); };
   $('lockBtn').onclick = toggleLock;
   $('manualBtn').onclick = submitManual;
+  $('groupBtn').onclick = groupStamp;
   $('tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) switchTab(b.dataset.tab); };
   $('studentChips').onclick = (e) => {
     const b = e.target.closest('[data-no]');
@@ -2794,5 +2999,291 @@ const HTML_SOURCES = {
   @keyframes scan { from { background-position: -50% 0; } to { background-position: 150% 0; } }
   .hidden { display: none !important; }
 </style>
+`,
+  "Teacher": `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles') ?>
+  <style>
+    .wrap { max-width: 980px; }
+    .hero h1 { font-size: clamp(22px, 4vw, 34px); }
+    .big-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .tbtn {
+      appearance: none; font: inherit; cursor: pointer; min-height: 64px; border-radius: 14px; padding: 10px;
+      background: #0a1a33; color: var(--text); border: 1px solid var(--navy-line); font-weight: 700; font-size: 18px;
+    }
+    .tbtn small { display: block; color: var(--muted); font-weight: 500; font-size: 13px; }
+    .tbtn.on { background: var(--sky); color: #04203d; border-color: var(--sky); box-shadow: 0 0 14px #5cc8ff88; }
+    .tbtn.on small { color: #04203d; }
+    .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+    .pgrid .tbtn { min-height: 70px; font-size: 20px; }
+    .now-tag { display: inline-block; font-size: 11px; background: var(--yellow); color: #1a1a1a; border-radius: 999px; padding: 0 6px; margin-left: 4px; vertical-align: middle; }
+
+    .classbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .classbar .who { flex: 1 1 260px; font-size: 20px; font-weight: 900; }
+    .classbar .who span { color: var(--yellow); }
+    .mvpline { margin-top: 8px; font-weight: 700; }
+
+    .sgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+    .sbtn {
+      position: relative; appearance: none; font: inherit; cursor: pointer; min-height: 76px; border-radius: 16px;
+      background: #f2f5fb; color: #13294b; border: 0; font-weight: 900; font-size: 20px; padding: 8px 6px;
+      box-shadow: 0 3px 0 #9fb3d1;
+    }
+    .sbtn:active { transform: translateY(2px); box-shadow: 0 1px 0 #9fb3d1; }
+    .sbtn .no { display: block; font-size: 12px; color: #6b7a99; font-weight: 700; }
+    .sbtn.low { background: #fff8d9; box-shadow: 0 3px 0 #e6c95a, 0 0 0 2px #ffe58a; }
+    .sbtn .badges { position: absolute; top: 4px; right: 6px; font-size: 13px; }
+    .sbtn .got { position: absolute; top: 4px; left: 6px; font-size: 12px; color: #1a9b4b; font-weight: 900; }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+    .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 4px; }
+
+    .pick { display: grid; gap: 10px; margin-top: 12px; }
+    .pick .btn { min-height: 64px; font-size: 20px; }
+    .log { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #ffffff12; }
+    .log .t { color: var(--muted); width: 48px; }
+    .log .n { flex: 1; font-weight: 700; }
+
+    #undoBar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55; display: none; align-items: center; gap: 14px;
+      background: #0a1a33; border: 1px solid var(--yellow); border-radius: 14px; padding: 10px 12px 10px 18px; box-shadow: 0 0 22px #ffd23f55; font-weight: 700; max-width: 94vw; }
+  </style>
+</head>
+<body>
+<div id="loading"></div>
+<div class="wrap">
+  <div class="metal hero">
+    <h1 class="title-font"><?!= titleHtml ?></h1>
+    <div class="tag">MISSION3 · 수업 듣고 도장 얻자!</div>
+  </div>
+
+  <!-- 1) 태블릿 잠금 해제 (처음 한 번) -->
+  <section id="unlock" class="box hidden" style="max-width:440px;margin:14px auto 0">
+    <h2 class="title-font">🔐 교과 선생님 화면 열기</h2>
+    <p class="muted">처음 한 번만 입력하면 이 기기가 기억해요.</p>
+    <label for="code">교과 선생님 공통 코드</label>
+    <input id="code" type="password" inputmode="numeric" autocomplete="off">
+    <button class="btn yellow block" style="margin-top:12px" id="unlockBtn">열기</button>
+  </section>
+
+  <!-- 2) 선생님 + 교시 선택 -->
+  <section id="start" class="hidden">
+    <div class="box">
+      <h2 class="title-font">🧑‍🏫 선생님을 선택해 주세요</h2>
+      <div class="big-grid" id="teacherGrid"></div>
+      <div id="teacherFree" class="hidden" style="margin-top:10px">
+        <p class="muted">설정 시트의 "교과 선생님 목록"이 비어 있어요. 이름을 직접 입력해 주세요.</p>
+        <input id="teacherInput" type="text" maxlength="20" placeholder="선생님 이름">
+      </div>
+    </div>
+    <div class="box">
+      <h2 class="title-font">⏰ 교시 <span class="muted" id="nowText" style="font-size:14px"></span></h2>
+      <div class="pgrid" id="periodGrid"></div>
+      <div id="dayNote" class="warn hidden"></div>
+      <button class="btn yellow block" style="margin-top:14px;min-height:60px;font-size:20px" id="startBtn">확인</button>
+    </div>
+  </section>
+
+  <!-- 3) 수업 중: 투투 선택 -->
+  <section id="class" class="hidden">
+    <div class="box">
+      <div class="classbar">
+        <div class="who" id="who"></div>
+        <button class="btn sm ghost" id="reloadBtn">새로고침</button>
+        <button class="btn danger" id="endBtn">수업 끝</button>
+      </div>
+      <div class="mvpline" id="mvpLine"></div>
+    </div>
+    <div class="box">
+      <h2 class="title-font" id="gridTitle"></h2>
+      <div class="sgrid" id="studentGrid"></div>
+      <div class="legend">
+        <span><b style="color:#1a9b4b">✓</b> 오늘 수업 도장 받음</span>
+        <span><i style="background:#fff8d9;box-shadow:0 0 0 2px #ffe58a"></i>최근 수업 도장이 적은 친구</span>
+        <span>➕ 이번 교시 +2 · 🏅 이번 교시 MVP</span>
+      </div>
+    </div>
+    <div class="box">
+      <h2 class="title-font">📝 이번 교시 기록</h2>
+      <div id="logList"></div>
+    </div>
+  </section>
+</div>
+
+<div id="undoBar"><span id="undoText"></span><button class="btn sm yellow" id="undoBtn">되돌리기</button></div>
+<div id="toast"></div>
+<div id="modal-root"></div>
+
+<script>
+  const S = { token: null, init: null, teacher: '', period: null, data: null, lastId: null, idleTimer: null, undoTimer: null };
+  const $ = (id) => document.getElementById(id);
+  const IDLE_MS = 5 * 60 * 1000;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  let toastTimer = null;
+  function toast(msg, isErr) {
+    const t = $('toast');
+    t.textContent = msg; t.className = isErr ? 'err' : ''; t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.style.display = 'none'), 2800);
+  }
+
+  function call(fn, ...args) {
+    $('loading').style.display = 'block';
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((r) => { $('loading').style.display = 'none'; resolve(r); })
+        .withFailureHandler((err) => {
+          $('loading').style.display = 'none';
+          let msg = (err && err.message) || String(err);
+          if (msg.indexOf('AUTH:') >= 0) { lockDevice(); msg = msg.replace(/^.*AUTH:\\s*/, ''); }
+          reject(new Error(msg.replace(/^(Error|Exception):\\s*/, '')));
+        })[fn](...args);
+    });
+  }
+
+  function show(id) { ['unlock', 'start', 'class'].forEach((x) => $(x).classList.toggle('hidden', x !== id)); window.scrollTo(0, 0); }
+
+  // ---------- 잠금 해제 ----------
+  function lockDevice() { S.token = null; store('teacherToken', null); show('unlock'); }
+  async function unlock() {
+    const code = $('code').value.trim();
+    if (!code) return toast('코드를 입력해 주세요.', true);
+    try {
+      const r = await call('teacherUnlock', code);
+      S.token = r.token; store('teacherToken', r.token); $('code').value = '';
+      await goStart();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- 선생님·교시 선택 ----------
+  async function goStart() {
+    hideUndo();
+    try { S.init = await call('teacherInit', S.token); } catch (e) { return toast(e.message, true); }
+    const d = S.init;
+    S.period = d.suggestedPeriod || S.period || 1;
+    if (!S.teacher) S.teacher = load('lastTeacher') || '';
+    if (d.teachers.length && !d.teachers.some((t) => t.name === S.teacher)) S.teacher = '';
+    renderStart();
+    show('start');
+  }
+
+  function renderStart() {
+    const d = S.init;
+    $('teacherGrid').innerHTML = d.teachers.map((t) =>
+      \`<button class="tbtn \${S.teacher === t.name ? 'on' : ''}" data-teacher="\${esc(t.name)}">\${esc(t.name)}<small>\${esc(t.subject)}</small></button>\`).join('');
+    $('teacherFree').classList.toggle('hidden', d.teachers.length > 0);
+    $('nowText').textContent = \`지금 \${d.now}\${d.suggestedPeriod ? \` → \${d.suggestedPeriod}교시 자동 선택\` : ''}\`;
+    $('periodGrid').innerHTML = d.periods.map((p) =>
+      \`<button class="tbtn \${S.period === p.period ? 'on' : ''}" data-period="\${p.period}">\${p.period}교시\${d.suggestedPeriod === p.period ? '<span class="now-tag">지금</span>' : ''}
+        <small>\${esc(p.subject || '-')}\${p.start ? ' · ' + esc(p.start) : ''}</small></button>\`).join('');
+    $('dayNote').classList.toggle('hidden', d.isSchoolDay);
+    $('dayNote').textContent = d.isSchoolDay ? '' : '오늘은 캠페인 등교일이 아니라서 도장을 줄 수 없어요.';
+  }
+
+  async function startClass() {
+    const name = S.init.teachers.length ? S.teacher : $('teacherInput').value.trim();
+    if (!name) return toast('선생님을 선택해 주세요.', true);
+    if (!S.period) return toast('교시를 선택해 주세요.', true);
+    try {
+      S.data = await call('teacherSession', S.token, name, S.period);
+      S.teacher = name; store('lastTeacher', name);
+      renderClass(); show('class'); bumpIdle();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- 수업 중 ----------
+  function renderClass() {
+    const d = S.data;
+    $('who').innerHTML = \`🧑‍🏫 \${esc(d.teacher)} 선생님 · <span>\${d.period}교시</span> \${esc(d.subject)}\`;
+    $('mvpLine').innerHTML = d.mvp
+      ? \`🏅 오늘 \${d.period}교시 MVP: <b class="yellow">\${esc(d.mvp.name)}</b>\`
+      : \`<span class="muted">🏅 오늘 \${d.period}교시 MVP를 아직 뽑지 않았어요.</span>\`;
+    $('gridTitle').textContent = \`\${d.nickname} 이름을 눌러 도장을 주세요\`;
+    $('studentGrid').innerHTML = d.students.map((s) => \`<button class="sbtn \${s.low ? 'low' : ''}" data-no="\${esc(s.no)}">
+        \${s.todayGot ? '<span class="got">✓</span>' : ''}<span class="badges">\${s.classDone ? '➕' : ''}\${s.isMvp ? '🏅' : ''}</span>
+        <span class="no">\${esc(s.no)}번</span>\${esc(s.name)}</button>\`).join('');
+    $('logList').innerHTML = d.log.length ? d.log.map((r) => \`<div class="log">
+        <span class="t">\${esc(r.ts)}</span><span class="n">\${esc(r.name)} \${r.mission === 'MVP' ? '🏅 MVP +3' : '➕ 적극 참여 +2'}</span>
+        <span class="muted" style="font-size:13px">\${esc(r.by)}</span>
+        <button class="btn sm danger" data-undo="\${esc(r.id)}">되돌리기</button></div>\`).join('')
+      : '<p class="muted">아직 기록이 없어요.</p>';
+  }
+
+  function pickStudent(no) {
+    const d = S.data;
+    const s = d.students.find((x) => x.no === no);
+    if (!s) return;
+    const root = $('modal-root');
+    root.innerHTML = \`<div class="modal-bg"><div class="modal"><div class="box">
+        <h2 class="title-font" style="text-align:center;font-size:28px">\${esc(s.name)}</h2>
+        <div class="pick">
+          <button class="btn" data-kind="class" \${s.classDone ? 'disabled' : ''}>➕ 적극 참여 +2\${s.classDone ? ' (이번 교시 받음)' : ''}</button>
+          <button class="btn yellow" data-kind="mvp" \${d.mvp ? 'disabled' : ''}>🏅 MVP +3\${d.mvp ? \` (MVP: \${esc(d.mvp.name)})\` : ''}</button>
+          <button class="btn ghost" data-kind="">닫기</button>
+        </div></div></div></div>\`;
+    root.querySelector('.pick').onclick = async (e) => {
+      const b = e.target.closest('[data-kind]');
+      if (!b || b.disabled) return;
+      root.innerHTML = '';
+      if (b.dataset.kind) await stamp(no, b.dataset.kind, s.name);
+    };
+  }
+
+  async function stamp(no, kind, name) {
+    try {
+      S.data = await call('teacherStamp', S.token, S.teacher, S.period, no, kind);
+      renderClass();
+      showUndo(\`\${name} \${kind === 'mvp' ? '🏅 MVP +3' : '➕ +2'} 완료!\`, S.data.lastId);
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function undo(id) {
+    try {
+      S.data = await call('teacherUndo', S.token, S.teacher, S.period, id);
+      renderClass(); hideUndo(); toast('되돌렸어요.');
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function showUndo(text, id) {
+    $('undoText').textContent = text;
+    $('undoBtn').onclick = () => undo(id);
+    $('undoBar').style.display = 'flex';
+    clearTimeout(S.undoTimer);
+    S.undoTimer = setTimeout(hideUndo, 8000);
+  }
+  function hideUndo() { $('undoBar').style.display = 'none'; clearTimeout(S.undoTimer); }
+
+  // 5분 동안 아무 입력이 없으면 첫 화면으로
+  function bumpIdle() {
+    clearTimeout(S.idleTimer);
+    S.idleTimer = setTimeout(() => { if (!$('class').classList.contains('hidden')) { $('modal-root').innerHTML = ''; goStart(); } }, IDLE_MS);
+  }
+
+  // ---------- 이벤트 ----------
+  $('unlockBtn').onclick = unlock;
+  $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlock(); });
+  $('teacherGrid').onclick = (e) => { const b = e.target.closest('[data-teacher]'); if (b) { S.teacher = b.dataset.teacher; renderStart(); } };
+  $('periodGrid').onclick = (e) => { const b = e.target.closest('[data-period]'); if (b) { S.period = Number(b.dataset.period); renderStart(); } };
+  $('startBtn').onclick = startClass;
+  $('studentGrid').onclick = (e) => { const b = e.target.closest('[data-no]'); if (b) pickStudent(b.dataset.no); };
+  $('logList').onclick = (e) => { const b = e.target.closest('[data-undo]'); if (b) undo(b.dataset.undo); };
+  $('endBtn').onclick = () => { S.data = null; goStart(); };
+  $('reloadBtn').onclick = async () => {
+    try { S.data = await call('teacherSession', S.token, S.teacher, S.period); renderClass(); } catch (e) { toast(e.message, true); }
+  };
+  ['click', 'touchstart'].forEach((ev) => document.addEventListener(ev, bumpIdle, { passive: true }));
+
+  S.token = load('teacherToken');
+  if (S.token) goStart(); else show('unlock');
+</script>
+</body>
+</html>
 `,
 };

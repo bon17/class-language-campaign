@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles') ?>
+  <style>
+    .wrap { max-width: 980px; }
+    .hero h1 { font-size: clamp(22px, 4vw, 34px); }
+    .big-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+    .tbtn {
+      appearance: none; font: inherit; cursor: pointer; min-height: 64px; border-radius: 14px; padding: 10px;
+      background: #0a1a33; color: var(--text); border: 1px solid var(--navy-line); font-weight: 700; font-size: 18px;
+    }
+    .tbtn small { display: block; color: var(--muted); font-weight: 500; font-size: 13px; }
+    .tbtn.on { background: var(--sky); color: #04203d; border-color: var(--sky); box-shadow: 0 0 14px #5cc8ff88; }
+    .tbtn.on small { color: #04203d; }
+    .pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+    .pgrid .tbtn { min-height: 70px; font-size: 20px; }
+    .now-tag { display: inline-block; font-size: 11px; background: var(--yellow); color: #1a1a1a; border-radius: 999px; padding: 0 6px; margin-left: 4px; vertical-align: middle; }
+
+    .classbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .classbar .who { flex: 1 1 260px; font-size: 20px; font-weight: 900; }
+    .classbar .who span { color: var(--yellow); }
+    .mvpline { margin-top: 8px; font-weight: 700; }
+
+    .sgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+    .sbtn {
+      position: relative; appearance: none; font: inherit; cursor: pointer; min-height: 76px; border-radius: 16px;
+      background: #f2f5fb; color: #13294b; border: 0; font-weight: 900; font-size: 20px; padding: 8px 6px;
+      box-shadow: 0 3px 0 #9fb3d1;
+    }
+    .sbtn:active { transform: translateY(2px); box-shadow: 0 1px 0 #9fb3d1; }
+    .sbtn .no { display: block; font-size: 12px; color: #6b7a99; font-weight: 700; }
+    .sbtn.low { background: #fff8d9; box-shadow: 0 3px 0 #e6c95a, 0 0 0 2px #ffe58a; }
+    .sbtn .badges { position: absolute; top: 4px; right: 6px; font-size: 13px; }
+    .sbtn .got { position: absolute; top: 4px; left: 6px; font-size: 12px; color: #1a9b4b; font-weight: 900; }
+    .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+    .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 4px; }
+
+    .pick { display: grid; gap: 10px; margin-top: 12px; }
+    .pick .btn { min-height: 64px; font-size: 20px; }
+    .log { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #ffffff12; }
+    .log .t { color: var(--muted); width: 48px; }
+    .log .n { flex: 1; font-weight: 700; }
+
+    #undoBar { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 55; display: none; align-items: center; gap: 14px;
+      background: #0a1a33; border: 1px solid var(--yellow); border-radius: 14px; padding: 10px 12px 10px 18px; box-shadow: 0 0 22px #ffd23f55; font-weight: 700; max-width: 94vw; }
+  </style>
+</head>
+<body>
+<div id="loading"></div>
+<div class="wrap">
+  <div class="metal hero">
+    <h1 class="title-font"><?!= titleHtml ?></h1>
+    <div class="tag">MISSION3 · 수업 듣고 도장 얻자!</div>
+  </div>
+
+  <!-- 1) 태블릿 잠금 해제 (처음 한 번) -->
+  <section id="unlock" class="box hidden" style="max-width:440px;margin:14px auto 0">
+    <h2 class="title-font">🔐 교과 선생님 화면 열기</h2>
+    <p class="muted">처음 한 번만 입력하면 이 기기가 기억해요.</p>
+    <label for="code">교과 선생님 공통 코드</label>
+    <input id="code" type="password" inputmode="numeric" autocomplete="off">
+    <button class="btn yellow block" style="margin-top:12px" id="unlockBtn">열기</button>
+  </section>
+
+  <!-- 2) 선생님 + 교시 선택 -->
+  <section id="start" class="hidden">
+    <div class="box">
+      <h2 class="title-font">🧑‍🏫 선생님을 선택해 주세요</h2>
+      <div class="big-grid" id="teacherGrid"></div>
+      <div id="teacherFree" class="hidden" style="margin-top:10px">
+        <p class="muted">설정 시트의 "교과 선생님 목록"이 비어 있어요. 이름을 직접 입력해 주세요.</p>
+        <input id="teacherInput" type="text" maxlength="20" placeholder="선생님 이름">
+      </div>
+    </div>
+    <div class="box">
+      <h2 class="title-font">⏰ 교시 <span class="muted" id="nowText" style="font-size:14px"></span></h2>
+      <div class="pgrid" id="periodGrid"></div>
+      <div id="dayNote" class="warn hidden"></div>
+      <button class="btn yellow block" style="margin-top:14px;min-height:60px;font-size:20px" id="startBtn">확인</button>
+    </div>
+  </section>
+
+  <!-- 3) 수업 중: 투투 선택 -->
+  <section id="class" class="hidden">
+    <div class="box">
+      <div class="classbar">
+        <div class="who" id="who"></div>
+        <button class="btn sm ghost" id="reloadBtn">새로고침</button>
+        <button class="btn danger" id="endBtn">수업 끝</button>
+      </div>
+      <div class="mvpline" id="mvpLine"></div>
+    </div>
+    <div class="box">
+      <h2 class="title-font" id="gridTitle"></h2>
+      <div class="sgrid" id="studentGrid"></div>
+      <div class="legend">
+        <span><b style="color:#1a9b4b">✓</b> 오늘 수업 도장 받음</span>
+        <span><i style="background:#fff8d9;box-shadow:0 0 0 2px #ffe58a"></i>최근 수업 도장이 적은 친구</span>
+        <span>➕ 이번 교시 +2 · 🏅 이번 교시 MVP</span>
+      </div>
+    </div>
+    <div class="box">
+      <h2 class="title-font">📝 이번 교시 기록</h2>
+      <div id="logList"></div>
+    </div>
+  </section>
+</div>
+
+<div id="undoBar"><span id="undoText"></span><button class="btn sm yellow" id="undoBtn">되돌리기</button></div>
+<div id="toast"></div>
+<div id="modal-root"></div>
+
+<script>
+  const S = { token: null, init: null, teacher: '', period: null, data: null, lastId: null, idleTimer: null, undoTimer: null };
+  const $ = (id) => document.getElementById(id);
+  const IDLE_MS = 5 * 60 * 1000;
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+
+  let toastTimer = null;
+  function toast(msg, isErr) {
+    const t = $('toast');
+    t.textContent = msg; t.className = isErr ? 'err' : ''; t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.style.display = 'none'), 2800);
+  }
+
+  function call(fn, ...args) {
+    $('loading').style.display = 'block';
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((r) => { $('loading').style.display = 'none'; resolve(r); })
+        .withFailureHandler((err) => {
+          $('loading').style.display = 'none';
+          let msg = (err && err.message) || String(err);
+          if (msg.indexOf('AUTH:') >= 0) { lockDevice(); msg = msg.replace(/^.*AUTH:\s*/, ''); }
+          reject(new Error(msg.replace(/^(Error|Exception):\s*/, '')));
+        })[fn](...args);
+    });
+  }
+
+  function show(id) { ['unlock', 'start', 'class'].forEach((x) => $(x).classList.toggle('hidden', x !== id)); window.scrollTo(0, 0); }
+
+  // ---------- 잠금 해제 ----------
+  function lockDevice() { S.token = null; store('teacherToken', null); show('unlock'); }
+  async function unlock() {
+    const code = $('code').value.trim();
+    if (!code) return toast('코드를 입력해 주세요.', true);
+    try {
+      const r = await call('teacherUnlock', code);
+      S.token = r.token; store('teacherToken', r.token); $('code').value = '';
+      await goStart();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- 선생님·교시 선택 ----------
+  async function goStart() {
+    hideUndo();
+    try { S.init = await call('teacherInit', S.token); } catch (e) { return toast(e.message, true); }
+    const d = S.init;
+    S.period = d.suggestedPeriod || S.period || 1;
+    if (!S.teacher) S.teacher = load('lastTeacher') || '';
+    if (d.teachers.length && !d.teachers.some((t) => t.name === S.teacher)) S.teacher = '';
+    renderStart();
+    show('start');
+  }
+
+  function renderStart() {
+    const d = S.init;
+    $('teacherGrid').innerHTML = d.teachers.map((t) =>
+      `<button class="tbtn ${S.teacher === t.name ? 'on' : ''}" data-teacher="${esc(t.name)}">${esc(t.name)}<small>${esc(t.subject)}</small></button>`).join('');
+    $('teacherFree').classList.toggle('hidden', d.teachers.length > 0);
+    $('nowText').textContent = `지금 ${d.now}${d.suggestedPeriod ? ` → ${d.suggestedPeriod}교시 자동 선택` : ''}`;
+    $('periodGrid').innerHTML = d.periods.map((p) =>
+      `<button class="tbtn ${S.period === p.period ? 'on' : ''}" data-period="${p.period}">${p.period}교시${d.suggestedPeriod === p.period ? '<span class="now-tag">지금</span>' : ''}
+        <small>${esc(p.subject || '-')}${p.start ? ' · ' + esc(p.start) : ''}</small></button>`).join('');
+    $('dayNote').classList.toggle('hidden', d.isSchoolDay);
+    $('dayNote').textContent = d.isSchoolDay ? '' : '오늘은 캠페인 등교일이 아니라서 도장을 줄 수 없어요.';
+  }
+
+  async function startClass() {
+    const name = S.init.teachers.length ? S.teacher : $('teacherInput').value.trim();
+    if (!name) return toast('선생님을 선택해 주세요.', true);
+    if (!S.period) return toast('교시를 선택해 주세요.', true);
+    try {
+      S.data = await call('teacherSession', S.token, name, S.period);
+      S.teacher = name; store('lastTeacher', name);
+      renderClass(); show('class'); bumpIdle();
+    } catch (e) { toast(e.message, true); }
+  }
+
+  // ---------- 수업 중 ----------
+  function renderClass() {
+    const d = S.data;
+    $('who').innerHTML = `🧑‍🏫 ${esc(d.teacher)} 선생님 · <span>${d.period}교시</span> ${esc(d.subject)}`;
+    $('mvpLine').innerHTML = d.mvp
+      ? `🏅 오늘 ${d.period}교시 MVP: <b class="yellow">${esc(d.mvp.name)}</b>`
+      : `<span class="muted">🏅 오늘 ${d.period}교시 MVP를 아직 뽑지 않았어요.</span>`;
+    $('gridTitle').textContent = `${d.nickname} 이름을 눌러 도장을 주세요`;
+    $('studentGrid').innerHTML = d.students.map((s) => `<button class="sbtn ${s.low ? 'low' : ''}" data-no="${esc(s.no)}">
+        ${s.todayGot ? '<span class="got">✓</span>' : ''}<span class="badges">${s.classDone ? '➕' : ''}${s.isMvp ? '🏅' : ''}</span>
+        <span class="no">${esc(s.no)}번</span>${esc(s.name)}</button>`).join('');
+    $('logList').innerHTML = d.log.length ? d.log.map((r) => `<div class="log">
+        <span class="t">${esc(r.ts)}</span><span class="n">${esc(r.name)} ${r.mission === 'MVP' ? '🏅 MVP +3' : '➕ 적극 참여 +2'}</span>
+        <span class="muted" style="font-size:13px">${esc(r.by)}</span>
+        <button class="btn sm danger" data-undo="${esc(r.id)}">되돌리기</button></div>`).join('')
+      : '<p class="muted">아직 기록이 없어요.</p>';
+  }
+
+  function pickStudent(no) {
+    const d = S.data;
+    const s = d.students.find((x) => x.no === no);
+    if (!s) return;
+    const root = $('modal-root');
+    root.innerHTML = `<div class="modal-bg"><div class="modal"><div class="box">
+        <h2 class="title-font" style="text-align:center;font-size:28px">${esc(s.name)}</h2>
+        <div class="pick">
+          <button class="btn" data-kind="class" ${s.classDone ? 'disabled' : ''}>➕ 적극 참여 +2${s.classDone ? ' (이번 교시 받음)' : ''}</button>
+          <button class="btn yellow" data-kind="mvp" ${d.mvp ? 'disabled' : ''}>🏅 MVP +3${d.mvp ? ` (MVP: ${esc(d.mvp.name)})` : ''}</button>
+          <button class="btn ghost" data-kind="">닫기</button>
+        </div></div></div></div>`;
+    root.querySelector('.pick').onclick = async (e) => {
+      const b = e.target.closest('[data-kind]');
+      if (!b || b.disabled) return;
+      root.innerHTML = '';
+      if (b.dataset.kind) await stamp(no, b.dataset.kind, s.name);
+    };
+  }
+
+  async function stamp(no, kind, name) {
+    try {
+      S.data = await call('teacherStamp', S.token, S.teacher, S.period, no, kind);
+      renderClass();
+      showUndo(`${name} ${kind === 'mvp' ? '🏅 MVP +3' : '➕ +2'} 완료!`, S.data.lastId);
+    } catch (e) { toast(e.message, true); }
+  }
+
+  async function undo(id) {
+    try {
+      S.data = await call('teacherUndo', S.token, S.teacher, S.period, id);
+      renderClass(); hideUndo(); toast('되돌렸어요.');
+    } catch (e) { toast(e.message, true); }
+  }
+
+  function showUndo(text, id) {
+    $('undoText').textContent = text;
+    $('undoBtn').onclick = () => undo(id);
+    $('undoBar').style.display = 'flex';
+    clearTimeout(S.undoTimer);
+    S.undoTimer = setTimeout(hideUndo, 8000);
+  }
+  function hideUndo() { $('undoBar').style.display = 'none'; clearTimeout(S.undoTimer); }
+
+  // 5분 동안 아무 입력이 없으면 첫 화면으로
+  function bumpIdle() {
+    clearTimeout(S.idleTimer);
+    S.idleTimer = setTimeout(() => { if (!$('class').classList.contains('hidden')) { $('modal-root').innerHTML = ''; goStart(); } }, IDLE_MS);
+  }
+
+  // ---------- 이벤트 ----------
+  $('unlockBtn').onclick = unlock;
+  $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlock(); });
+  $('teacherGrid').onclick = (e) => { const b = e.target.closest('[data-teacher]'); if (b) { S.teacher = b.dataset.teacher; renderStart(); } };
+  $('periodGrid').onclick = (e) => { const b = e.target.closest('[data-period]'); if (b) { S.period = Number(b.dataset.period); renderStart(); } };
+  $('startBtn').onclick = startClass;
+  $('studentGrid').onclick = (e) => { const b = e.target.closest('[data-no]'); if (b) pickStudent(b.dataset.no); };
+  $('logList').onclick = (e) => { const b = e.target.closest('[data-undo]'); if (b) undo(b.dataset.undo); };
+  $('endBtn').onclick = () => { S.data = null; goStart(); };
+  $('reloadBtn').onclick = async () => {
+    try { S.data = await call('teacherSession', S.token, S.teacher, S.period); renderClass(); } catch (e) { toast(e.message, true); }
+  };
+  ['click', 'touchstart'].forEach((ev) => document.addEventListener(ev, bumpIdle, { passive: true }));
+
+  S.token = load('teacherToken');
+  if (S.token) goStart(); else show('unlock');
+</script>
+</body>
+</html>

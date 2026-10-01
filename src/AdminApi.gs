@@ -46,6 +46,20 @@ function adminAddManual(token, payload) {
   return buildAdminDashboard_();
 }
 
+/** 반 전체 단체 도장 +3. payload: {date, memo} */
+function adminGroupStamp(token, payload) {
+  requireAdmin_(token);
+  const p = payload || {};
+  const date = toDateStr_(p.date || todayStr_());
+  const memo = String(p.memo || '').trim() || '단체 도장';
+  if (!date) throw new Error('날짜 형식이 올바르지 않아요.');
+  if (memo.length > 200) throw new Error('메모는 200자 이내로 입력해 주세요.');
+  const students = readStudents_();
+  if (!students.length) throw new Error('학생 명단이 비어 있어요.');
+  appendRecords_(students.map((s) => ({ date, no: s.no, mission: '단체', score: 3, inputType: '담임', inputBy: '담임', memo })));
+  return buildAdminDashboard_();
+}
+
 function adminCancelRecord(token, id, reason) {
   requireAdmin_(token);
   const r = String(reason || '').trim();
