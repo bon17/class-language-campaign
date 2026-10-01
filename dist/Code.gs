@@ -47,6 +47,7 @@ const CONFIG_DEFS = [
   { key: 'adminCode', label: '담임 코드', type: 'code', def: '', desc: '담임 대시보드 입장 코드. 비우면 초기 세팅 때 자동 생성' },
   { key: 'accuseResultPublic', label: '지목 결과 공개', type: 'bool', def: false, desc: 'ON이면 검거 결과를 다른 투투에게 공개' },
   { key: 'excludedSubjects', label: '캠페인 제외 과목', type: 'list', def: '동아리', desc: '쉼표로 구분. 졸지 않기 체크·교과 도장에서 빠짐 (시간표에는 회색으로 표시)' },
+  { key: 'testMode', label: '테스트 모드', type: 'bool', def: false, desc: 'ON이면 오늘을 등교일로 취급 (캠페인 전 테스트용). 테스트가 끝나면 꼭 OFF' },
   { key: 'periodCount', label: '교시 수', type: 'int', def: 6, desc: '교과 선생님 화면의 교시 버튼 개수' },
   { key: 'reward1', label: '1위 보상', type: 'string', def: '특별 간식 + 자리 우선권 2회 + 청소 면제권 5장 + 보은페이 보너스 100원', desc: '' },
   { key: 'reward2', label: '2위 보상', type: 'string', def: '간식 + 자리 우선권 2회 + 청소 면제권 3장', desc: '' },
@@ -74,7 +75,7 @@ function getConfig() {
   const hit = cache.get(CACHE_KEYS.CONFIG);
   if (hit) return JSON.parse(hit);
   const cfg = readConfigFromSheet_();
-  cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), 600);
+  cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
   return cfg;
 }
 
@@ -92,6 +93,9 @@ function readConfigFromSheet_() {
     cfg[d.key] = parseConfigValue_(d, Object.prototype.hasOwnProperty.call(raw, d.label) ? raw[d.label] : '');
   });
   if (!cfg.schoolDays.length) cfg.schoolDays = weekdaysBetween_(cfg.startDate, cfg.endDate);
+  // 테스트 모드: 오늘도 등교일로 본다
+  const today = todayStr_();
+  if (cfg.testMode && cfg.schoolDays.indexOf(today) < 0) cfg.schoolDays = cfg.schoolDays.concat(today).sort();
   cfg.rewards = [cfg.reward1, cfg.reward2, cfg.reward3, cfg.reward4, cfg.reward5];
   const fromSheet = readTeacherSheet_();
   cfg.teacherList = fromSheet.length ? fromSheet : cfg.teachers.map(parseTeacher_);
@@ -1360,7 +1364,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v7')) return;
+  if (!force && cache.get('schema_ok_v8')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -1392,7 +1396,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v7', '1', 21600);
+  cache.put('schema_ok_v8', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -1548,7 +1552,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v7']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v8']);
   invalidateStats_();
 }
 
@@ -1955,6 +1959,30 @@ function adminCancelRecord(token, id, reason) {
   return buildAdminDashboard_();
 }
 
+function adminSetTestMode(token, on) {
+  requireAdmin_(token);
+  setConfigValue_('testMode', !!on);
+  clearAllCaches_();
+  return buildAdminDashboard_();
+}
+
+/**
+ * 테스트 기록 전부 지우기: 기록장·일퀘·칭찬·암행어사·암행어사판정·지목·뽑기 시트의 2행부터 아래.
+ * 학생 명단·설정·시간표·교과선생님은 그대로. 확인 문구를 정확히 입력해야 실행된다.
+ */
+function adminClearTestData(token, confirmText) {
+  requireAdmin_(token);
+  if (String(confirmText || '').trim() !== '테스트 기록 삭제') throw new Error('확인 문구가 맞지 않아요.');
+  withLock_(() => {
+    [SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.SPY, SHEETS.SPY_JUDGE, SHEETS.ACCUSE, SHEETS.DRAW].forEach((name) => {
+      const sh = ss_().getSheetByName(name);
+      if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
+    });
+    clearAllCaches_();
+  });
+  return buildAdminDashboard_();
+}
+
 function adminSetRankLock(token, locked) {
   requireAdmin_(token);
   setConfigValue_('rankLocked', !!locked);
@@ -2040,7 +2068,7 @@ function buildAdminDashboard_() {
       midRankDate: cfg.midRankDate, rankPublicCount: cfg.rankPublicCount, rankLocked: cfg.rankLocked,
       drawStampThreshold: cfg.drawStampThreshold, praiseMinLength: cfg.praiseMinLength,
       accuseResultPublic: cfg.accuseResultPublic, periodCount: cfg.periodCount,
-      teacherCode: cfg.teacherCode, rewards: cfg.rewards, bannedWordCount: cfg.bannedWords.length,
+      teacherCode: cfg.teacherCode, testMode: cfg.testMode, rewards: cfg.rewards, bannedWordCount: cfg.bannedWords.length,
     },
     missions: MISSIONS,
     students: stats.list,
@@ -2085,7 +2113,12 @@ function titleHtml_(title) {
 
 /** HTML 템플릿에서 공통 조각 포함: <?!= include('Styles') ?> */
 function include(name) {
-  return htmlSource_(name);
+  const html = htmlSource_(name);
+  // 테스트 모드일 때 모든 화면 위에 표시
+  if (name === 'Styles' && getConfig().testMode) {
+    return html + '<div style="position:fixed;top:0;left:0;right:0;z-index:99;background:#ffd23f;color:#1a1a1a;text-align:center;font:700 13px sans-serif;padding:3px">🧪 테스트 모드 — 오늘을 등교일로 취급하는 중</div><div style="height:22px"></div>';
+  }
+  return html;
 }
 
 /**
@@ -2272,6 +2305,15 @@ const HTML_SOURCES = {
         <div class="grow" id="lockState"></div>
         <button class="btn" id="lockBtn" style="flex:0 0 auto"></button>
       </div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">🧪 테스트 모드</h2>
+      <div class="row">
+        <div class="grow" id="testState"></div>
+        <button class="btn" id="testBtn" style="flex:0 0 auto"></button>
+      </div>
+      <p class="muted">캠페인 전에 미리 해 볼 때 켜세요. 오늘을 등교일로 취급해 퀘스트·칭찬·교과 도장·암행어사를 모두 시험할 수 있어요.</p>
+      <button class="btn danger block" id="clearBtn">🗑 테스트 기록 모두 지우기</button>
+      <p class="muted">기록장·일퀘·칭찬·암행어사·판정·지목·뽑기 기록을 지워요. 학생 명단·로그인 코드·설정·시간표·교과선생님은 그대로예요.</p>
       <p class="muted">잠금 ON이면 투투 화면에 "랭킹 공개 전입니다"가 표시됩니다.</p>
       <div class="neon-line"></div>
       <h2 class="title-font">현재 설정</h2>
@@ -2401,7 +2443,7 @@ const HTML_SOURCES = {
       ['랭킹', c.rankLocked ? '🔒 잠금' : '🔓 공개'],
     ];
     $('cards').innerHTML = cards.map(([k, v]) => \`<div class="card"><div class="k">\${esc(k)}</div><div class="v" style="font-size:18px">\${esc(v)}</div></div>\`).join('');
-    $('warnings').innerHTML = (d.spy.needAppoint ? \`<div class="warn">🚨 \${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>\` : '') +
+    $('warnings').innerHTML = (d.cfg.testMode ? '<div class="warn">🧪 테스트 모드가 켜져 있어요. 테스트가 끝나면 ⚙️ 설정 탭에서 끄고 테스트 기록을 지워 주세요.</div>' : '') + (d.spy.needAppoint ? \`<div class="warn">🚨 \${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>\` : '') +
       d.warnings.map((w) => \`<div class="warn">⚠️ \${esc(w)}</div>\`).join('');
 
     $('sortBtn').textContent = S.sort === 'rank' ? '순위순 ▾' : '번호순 ▾';
@@ -2571,6 +2613,9 @@ const HTML_SOURCES = {
     $('lockState').innerHTML = \`현재: <span class="pill \${c.rankLocked ? 'on' : 'off'}">\${c.rankLocked ? '🔒 잠금 ON' : '🔓 공개 (잠금 OFF)'}</span>\`;
     $('lockBtn').textContent = c.rankLocked ? '랭킹 공개하기' : '랭킹 잠그기';
     $('lockBtn').className = c.rankLocked ? 'btn yellow' : 'btn';
+    $('testState').innerHTML = \`현재: <span class="pill \${c.testMode ? 'on' : 'off'}">\${c.testMode ? '🧪 테스트 모드 ON' : 'OFF (실제 운영)'}</span>\`;
+    $('testBtn').textContent = c.testMode ? '테스트 모드 끄기' : '테스트 모드 켜기';
+    $('testBtn').className = c.testMode ? 'btn yellow' : 'btn';
     const rows = [
       ['학생 호칭', c.nickname],
       ['기간', \`\${c.startDate} ~ \${c.endDate}\`],
@@ -2661,6 +2706,20 @@ const HTML_SOURCES = {
   $('reloadBtn').onclick = async () => { await refresh(true); toast('시트에서 다시 읽었어요.'); };
   $('sortBtn').onclick = () => { S.sort = S.sort === 'rank' ? 'no' : 'rank'; renderOverview(); };
   $('lockBtn').onclick = toggleLock;
+  $('testBtn').onclick = async () => {
+    const on = !S.data.cfg.testMode;
+    const ok = await modal({ title: on ? '테스트 모드 켜기' : '테스트 모드 끄기',
+      html: on ? '<p>오늘을 등교일로 취급해요. 모든 화면 위에 "🧪 테스트 모드" 표시가 나와요.</p>' : '<p>실제 운영 상태로 돌아가요. 테스트 기록은 아래 버튼으로 지워 주세요.</p>' });
+    if (!ok) return;
+    try { setData(await call('adminSetTestMode', S.token, on)); toast(on ? '테스트 모드를 켰어요.' : '테스트 모드를 껐어요.'); } catch (e) { toast(e.message, true); }
+  };
+  $('clearBtn').onclick = async () => {
+    const text = await modal({ title: '테스트 기록 모두 지우기',
+      html: '<p class="minus">되돌릴 수 없어요! 도장·칭찬·일퀘·암행어사·지목·뽑기 기록이 모두 지워져요.</p><p>계속하려면 아래에 <b class="yellow">테스트 기록 삭제</b>를 그대로 입력하세요.</p>',
+      input: '테스트 기록 삭제', okText: '모두 지우기', danger: true });
+    if (!text) return;
+    try { setData(await call('adminClearTestData', S.token, text)); toast('테스트 기록을 모두 지웠어요.'); } catch (e) { toast(e.message, true); }
+  };
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
   $('spyBtn').onclick = appointSpy;

@@ -30,7 +30,12 @@ function titleHtml_(title) {
 
 /** HTML 템플릿에서 공통 조각 포함: <?!= include('Styles') ?> */
 function include(name) {
-  return htmlSource_(name);
+  const html = htmlSource_(name);
+  // 테스트 모드일 때 모든 화면 위에 표시
+  if (name === 'Styles' && getConfig().testMode) {
+    return html + '<div style="position:fixed;top:0;left:0;right:0;z-index:99;background:#ffd23f;color:#1a1a1a;text-align:center;font:700 13px sans-serif;padding:3px">🧪 테스트 모드 — 오늘을 등교일로 취급하는 중</div><div style="height:22px"></div>';
+  }
+  return html;
 }
 
 /**

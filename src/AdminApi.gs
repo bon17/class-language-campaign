@@ -69,6 +69,30 @@ function adminCancelRecord(token, id, reason) {
   return buildAdminDashboard_();
 }
 
+function adminSetTestMode(token, on) {
+  requireAdmin_(token);
+  setConfigValue_('testMode', !!on);
+  clearAllCaches_();
+  return buildAdminDashboard_();
+}
+
+/**
+ * 테스트 기록 전부 지우기: 기록장·일퀘·칭찬·암행어사·암행어사판정·지목·뽑기 시트의 2행부터 아래.
+ * 학생 명단·설정·시간표·교과선생님은 그대로. 확인 문구를 정확히 입력해야 실행된다.
+ */
+function adminClearTestData(token, confirmText) {
+  requireAdmin_(token);
+  if (String(confirmText || '').trim() !== '테스트 기록 삭제') throw new Error('확인 문구가 맞지 않아요.');
+  withLock_(() => {
+    [SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.SPY, SHEETS.SPY_JUDGE, SHEETS.ACCUSE, SHEETS.DRAW].forEach((name) => {
+      const sh = ss_().getSheetByName(name);
+      if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
+    });
+    clearAllCaches_();
+  });
+  return buildAdminDashboard_();
+}
+
 function adminSetRankLock(token, locked) {
   requireAdmin_(token);
   setConfigValue_('rankLocked', !!locked);
@@ -154,7 +178,7 @@ function buildAdminDashboard_() {
       midRankDate: cfg.midRankDate, rankPublicCount: cfg.rankPublicCount, rankLocked: cfg.rankLocked,
       drawStampThreshold: cfg.drawStampThreshold, praiseMinLength: cfg.praiseMinLength,
       accuseResultPublic: cfg.accuseResultPublic, periodCount: cfg.periodCount,
-      teacherCode: cfg.teacherCode, rewards: cfg.rewards, bannedWordCount: cfg.bannedWords.length,
+      teacherCode: cfg.teacherCode, testMode: cfg.testMode, rewards: cfg.rewards, bannedWordCount: cfg.bannedWords.length,
     },
     missions: MISSIONS,
     students: stats.list,

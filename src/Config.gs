@@ -40,6 +40,7 @@ const CONFIG_DEFS = [
   { key: 'adminCode', label: '담임 코드', type: 'code', def: '', desc: '담임 대시보드 입장 코드. 비우면 초기 세팅 때 자동 생성' },
   { key: 'accuseResultPublic', label: '지목 결과 공개', type: 'bool', def: false, desc: 'ON이면 검거 결과를 다른 투투에게 공개' },
   { key: 'excludedSubjects', label: '캠페인 제외 과목', type: 'list', def: '동아리', desc: '쉼표로 구분. 졸지 않기 체크·교과 도장에서 빠짐 (시간표에는 회색으로 표시)' },
+  { key: 'testMode', label: '테스트 모드', type: 'bool', def: false, desc: 'ON이면 오늘을 등교일로 취급 (캠페인 전 테스트용). 테스트가 끝나면 꼭 OFF' },
   { key: 'periodCount', label: '교시 수', type: 'int', def: 6, desc: '교과 선생님 화면의 교시 버튼 개수' },
   { key: 'reward1', label: '1위 보상', type: 'string', def: '특별 간식 + 자리 우선권 2회 + 청소 면제권 5장 + 보은페이 보너스 100원', desc: '' },
   { key: 'reward2', label: '2위 보상', type: 'string', def: '간식 + 자리 우선권 2회 + 청소 면제권 3장', desc: '' },
@@ -67,7 +68,7 @@ function getConfig() {
   const hit = cache.get(CACHE_KEYS.CONFIG);
   if (hit) return JSON.parse(hit);
   const cfg = readConfigFromSheet_();
-  cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), 600);
+  cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
   return cfg;
 }
 
@@ -85,6 +86,9 @@ function readConfigFromSheet_() {
     cfg[d.key] = parseConfigValue_(d, Object.prototype.hasOwnProperty.call(raw, d.label) ? raw[d.label] : '');
   });
   if (!cfg.schoolDays.length) cfg.schoolDays = weekdaysBetween_(cfg.startDate, cfg.endDate);
+  // 테스트 모드: 오늘도 등교일로 본다
+  const today = todayStr_();
+  if (cfg.testMode && cfg.schoolDays.indexOf(today) < 0) cfg.schoolDays = cfg.schoolDays.concat(today).sort();
   cfg.rewards = [cfg.reward1, cfg.reward2, cfg.reward3, cfg.reward4, cfg.reward5];
   const fromSheet = readTeacherSheet_();
   cfg.teacherList = fromSheet.length ? fromSheet : cfg.teachers.map(parseTeacher_);

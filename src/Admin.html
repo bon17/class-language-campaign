@@ -171,6 +171,15 @@
         <div class="grow" id="lockState"></div>
         <button class="btn" id="lockBtn" style="flex:0 0 auto"></button>
       </div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">🧪 테스트 모드</h2>
+      <div class="row">
+        <div class="grow" id="testState"></div>
+        <button class="btn" id="testBtn" style="flex:0 0 auto"></button>
+      </div>
+      <p class="muted">캠페인 전에 미리 해 볼 때 켜세요. 오늘을 등교일로 취급해 퀘스트·칭찬·교과 도장·암행어사를 모두 시험할 수 있어요.</p>
+      <button class="btn danger block" id="clearBtn">🗑 테스트 기록 모두 지우기</button>
+      <p class="muted">기록장·일퀘·칭찬·암행어사·판정·지목·뽑기 기록을 지워요. 학생 명단·로그인 코드·설정·시간표·교과선생님은 그대로예요.</p>
       <p class="muted">잠금 ON이면 투투 화면에 "랭킹 공개 전입니다"가 표시됩니다.</p>
       <div class="neon-line"></div>
       <h2 class="title-font">현재 설정</h2>
@@ -300,7 +309,7 @@
       ['랭킹', c.rankLocked ? '🔒 잠금' : '🔓 공개'],
     ];
     $('cards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v" style="font-size:18px">${esc(v)}</div></div>`).join('');
-    $('warnings').innerHTML = (d.spy.needAppoint ? `<div class="warn">🚨 ${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>` : '') +
+    $('warnings').innerHTML = (d.cfg.testMode ? '<div class="warn">🧪 테스트 모드가 켜져 있어요. 테스트가 끝나면 ⚙️ 설정 탭에서 끄고 테스트 기록을 지워 주세요.</div>' : '') + (d.spy.needAppoint ? `<div class="warn">🚨 ${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>` : '') +
       d.warnings.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('');
 
     $('sortBtn').textContent = S.sort === 'rank' ? '순위순 ▾' : '번호순 ▾';
@@ -470,6 +479,9 @@
     $('lockState').innerHTML = `현재: <span class="pill ${c.rankLocked ? 'on' : 'off'}">${c.rankLocked ? '🔒 잠금 ON' : '🔓 공개 (잠금 OFF)'}</span>`;
     $('lockBtn').textContent = c.rankLocked ? '랭킹 공개하기' : '랭킹 잠그기';
     $('lockBtn').className = c.rankLocked ? 'btn yellow' : 'btn';
+    $('testState').innerHTML = `현재: <span class="pill ${c.testMode ? 'on' : 'off'}">${c.testMode ? '🧪 테스트 모드 ON' : 'OFF (실제 운영)'}</span>`;
+    $('testBtn').textContent = c.testMode ? '테스트 모드 끄기' : '테스트 모드 켜기';
+    $('testBtn').className = c.testMode ? 'btn yellow' : 'btn';
     const rows = [
       ['학생 호칭', c.nickname],
       ['기간', `${c.startDate} ~ ${c.endDate}`],
@@ -560,6 +572,20 @@
   $('reloadBtn').onclick = async () => { await refresh(true); toast('시트에서 다시 읽었어요.'); };
   $('sortBtn').onclick = () => { S.sort = S.sort === 'rank' ? 'no' : 'rank'; renderOverview(); };
   $('lockBtn').onclick = toggleLock;
+  $('testBtn').onclick = async () => {
+    const on = !S.data.cfg.testMode;
+    const ok = await modal({ title: on ? '테스트 모드 켜기' : '테스트 모드 끄기',
+      html: on ? '<p>오늘을 등교일로 취급해요. 모든 화면 위에 "🧪 테스트 모드" 표시가 나와요.</p>' : '<p>실제 운영 상태로 돌아가요. 테스트 기록은 아래 버튼으로 지워 주세요.</p>' });
+    if (!ok) return;
+    try { setData(await call('adminSetTestMode', S.token, on)); toast(on ? '테스트 모드를 켰어요.' : '테스트 모드를 껐어요.'); } catch (e) { toast(e.message, true); }
+  };
+  $('clearBtn').onclick = async () => {
+    const text = await modal({ title: '테스트 기록 모두 지우기',
+      html: '<p class="minus">되돌릴 수 없어요! 도장·칭찬·일퀘·암행어사·지목·뽑기 기록이 모두 지워져요.</p><p>계속하려면 아래에 <b class="yellow">테스트 기록 삭제</b>를 그대로 입력하세요.</p>',
+      input: '테스트 기록 삭제', okText: '모두 지우기', danger: true });
+    if (!text) return;
+    try { setData(await call('adminClearTestData', S.token, text)); toast('테스트 기록을 모두 지웠어요.'); } catch (e) { toast(e.message, true); }
+  };
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
   $('spyBtn').onclick = appointSpy;
