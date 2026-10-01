@@ -12,11 +12,20 @@ function doGet(e) {
 
   const t = HtmlService.createTemplate(htmlSource_(file || 'ComingSoon'));
   t.campaignName = cfg.campaignName;
+  t.titleHtml = titleHtml_(cfg.campaignName);
   t.subtitle = cfg.subtitle;
   t.nickname = cfg.nickname;
   return t.evaluate()
     .setTitle(cfg.campaignName)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+}
+
+/** 제목을 쉼표 뒤에서 줄바꿈: '바른 언어 사용하고,' / '보상 얻자!!' */
+function titleHtml_(title) {
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const m = String(title).match(/^(.*?,)\s*(.+)$/);
+  if (!m) return `<span class="line">${esc(title)}</span>`;
+  return `<span class="line">${esc(m[1])}</span><span class="line">${esc(m[2])}</span>`;
 }
 
 /** HTML 템플릿에서 공통 조각 포함: <?!= include('Styles') ?> */
