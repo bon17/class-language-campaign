@@ -515,7 +515,7 @@
     $('praiseDone').innerHTML = q.praise.done ? `✅ 오늘은 <b class="yellow">${esc(q.praise.toName)}</b>에게 칭찬했어요!` : '';
     $('praiseForm').classList.toggle('hidden', q.praise.done || !q.available);
     $('praiseHidden').classList.toggle('hidden', !q.praise.hidden);
-    $('praiseHidden').innerHTML = q.praise.hidden ? '🙈 담임 선생님이 오늘 보낸 칭찬을 숨겼어요. 칭찬 미션이 인정되지 않았어요.<br>비난·놀림 없이 바른 언어로 다시 칭찬해 주세요!' : '';
+    $('praiseHidden').innerHTML = q.praise.hidden ? '🙈 담임 선생님이 칭찬을 숨겼어요. 미션이 취소됩니다.<br>다시 칭찬을 써주세요.' : '';
     $('friendChips').innerHTML = d.friends.map((f) =>
       `<button class="chip ${S.praiseTo === f.no ? 'on' : ''}" data-friend="${esc(f.no)}" ${f.praised ? 'disabled' : ''}>${esc(f.name)}</button>`).join('');
     updatePraiseCount();
