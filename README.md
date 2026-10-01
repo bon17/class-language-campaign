@@ -37,16 +37,15 @@ Google 스프레드시트 + Apps Script로 만드는 2주 바른 언어 캠페�
 1. Google 드라이브 → **새로 만들기 → Google 스프레드시트** (이름 예: `바른언어 캠페인`)
 2. 상단 메뉴 **확장 프로그램 → Apps Script** 클릭 → 스크립트 편집기가 열림
 
-### 2. 파일 붙여 넣기
-`src/` 폴더의 파일을 편집기에 같은 이름으로 만듭니다.
+### 2. 코드 붙여 넣기 (파일 1개)
+1. 아래 주소를 열면 코드 전체가 글자로 보입니다.
+   https://raw.githubusercontent.com/bon17/class-language-campaign/claude/laughing-darwin-4vu9nz/dist/Code.gs
+2. **Ctrl+A**(전체 선택) → **Ctrl+C**(복사)
+3. Apps Script 편집기의 `Code.gs` 안에 있던 내용을 **모두 지우고** → **Ctrl+V**(붙여넣기)
+4. 💾 **저장** (Ctrl+S)
 
-| 저장소 파일 | 편집기에서 |
-|---|---|
-| `Code.gs`, `Config.gs`, `Ledger.gs`, `Auth.gs`, `Setup.gs`, `AdminApi.gs` | 파일 옆 **＋ → 스크립트**, 이름 입력(`.gs` 빼고), 내용 붙여넣기 |
-| `Admin.html`, `Styles.html`, `ComingSoon.html` | **＋ → HTML**, 이름 입력(`.html` 빼고), 내용 붙여넣기 |
-| `appsscript.json` | 왼쪽 ⚙️ **프로젝트 설정 → "appsscript.json 매니페스트 파일 표시" 체크** 후 편집기에서 열어 내용 교체 |
-
-처음 있던 `Code.gs`의 내용은 지우고 저장소의 `Code.gs`로 바꿉니다. 저장(💾)을 누릅니다.
+> 휴대폰보다 **컴퓨터**에서 하는 것을 권장합니다 (Apps Script 편집기가 모바일에서 불편합니다).
+> 다른 파일(HTML, appsscript.json)은 만들 필요 없습니다. 이 한 파일에 화면까지 모두 들어 있습니다.
 
 ### 3. 시트 초기 세팅
 1. 스프레드시트 탭으로 돌아가 **새로고침** → 상단에 **🚀 캠페인** 메뉴가 생김
@@ -61,12 +60,13 @@ Google 스프레드시트 + Apps Script로 만드는 2주 바른 언어 캠페�
 3. **다음 사용자 인증 정보로 실행: 나**, **액세스 권한이 있는 사용자: 모든 사용자**
 4. **배포** → 나오는 **웹 앱 URL**을 복사 (스프레드시트의 **🚀 캠페인 → 웹앱 주소 보기**로도 확인)
 
-### 코드를 고친 뒤 다시 반영하려면
-편집기에서 코드 수정·저장 → **배포 → 배포 관리 → ✏️(수정) → 버전: 새 버전 → 배포**.
+### 새 단계 코드로 업데이트하려면
+위 주소에서 최신 `Code.gs`를 다시 복사해 편집기 내용을 통째로 바꿔 붙여 넣고 저장 → **배포 → 배포 관리 → ✏️(수정) → 버전: 새 버전 → 배포**.
 이렇게 하면 **주소가 바뀌지 않고** 새 코드가 반영됩니다. ("새 배포"를 누르면 주소가 새로 생기니 주의)
 
-> (선택) 개발자용: [clasp](https://github.com/google/clasp)을 쓰면 `src/`를 그대로 올릴 수 있습니다.
-> `.clasp.json`에 `{"scriptId": "<스크립트 ID>", "rootDir": "src"}` 작성 후 `clasp push`.
+> 개발자용: 원본은 `src/` 폴더에 나뉘어 있고, `node tools/bundle.js`로 `dist/Code.gs` 한 파일을 만듭니다.
+> [clasp](https://github.com/google/clasp)을 쓰면 `src/`를 그대로 올려도 됩니다
+> (`.clasp.json`에 `{"scriptId": "<스크립트 ID>", "rootDir": "src"}` 작성 후 `clasp push`).
 
 ---
 
