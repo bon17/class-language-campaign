@@ -24,6 +24,7 @@ const SHEETS = {
   DRAW: '뽑기',
   TIMETABLE: '시간표',
   TT_OVERRIDE: '시간표변경',
+  TEACHERS: '교과선생님',
 };
 
 // type: string | int | bool | date | dateList | list | code
@@ -42,7 +43,7 @@ const CONFIG_DEFS = [
   { key: 'praiseMinLength', label: '칭찬 최소 글자 수', type: 'int', def: 10, desc: '' },
   { key: 'bannedWords', label: '금지어 목록', type: 'list', def: '시발, 씨발, ㅅㅂ, ㅆㅂ, 병신, ㅂㅅ, 개새끼, 새끼, 존나, ㅈㄴ, 좆, 지랄, 닥쳐, 꺼져, 미친놈, 미친년', desc: '쉼표로 구분' },
   { key: 'teacherCode', label: '교과 선생님 공통 코드', type: 'code', def: '', desc: '4자리. 비우면 초기 세팅 때 자동 생성' },
-  { key: 'teachers', label: '교과 선생님 목록', type: 'list', def: '', desc: '쉼표로 구분, 이름(과목) 형식. 예: 김민수(국어), 이지은(수학)' },
+  { key: 'teachers', label: '교과 선생님 목록', type: 'list', def: '', desc: '(예비용) "교과선생님" 시트가 비어 있을 때만 사용. 이름(과목) 형식, 쉼표로 구분' },
   { key: 'adminCode', label: '담임 코드', type: 'code', def: '', desc: '담임 대시보드 입장 코드. 비우면 초기 세팅 때 자동 생성' },
   { key: 'accuseResultPublic', label: '지목 결과 공개', type: 'bool', def: false, desc: 'ON이면 검거 결과를 다른 투투에게 공개' },
   { key: 'periodCount', label: '교시 수', type: 'int', def: 6, desc: '교과 선생님 화면의 교시 버튼 개수' },
@@ -91,7 +92,8 @@ function readConfigFromSheet_() {
   });
   if (!cfg.schoolDays.length) cfg.schoolDays = weekdaysBetween_(cfg.startDate, cfg.endDate);
   cfg.rewards = [cfg.reward1, cfg.reward2, cfg.reward3, cfg.reward4, cfg.reward5];
-  cfg.teacherList = cfg.teachers.map(parseTeacher_);
+  const fromSheet = readTeacherSheet_();
+  cfg.teacherList = fromSheet.length ? fromSheet : cfg.teachers.map(parseTeacher_);
   return cfg;
 }
 
@@ -136,6 +138,16 @@ function setConfigValue_(key, value) {
   if (idx >= 0) sh.getRange(idx + 2, 2).setValue(toSheetValue_(d, value));
   else sh.appendRow([d.label, toSheetValue_(d, value), d.desc]);
   CacheService.getScriptCache().remove(CACHE_KEYS.CONFIG);
+}
+
+/** "교과선생님" 시트: 과목 | 선생님 이름 (이름이 빈 줄은 건너뜀) */
+function readTeacherSheet_() {
+  const sh = ss_().getSheetByName(SHEETS.TEACHERS);
+  if (!sh || sh.getLastRow() < 2) return [];
+  const seen = {};
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues()
+    .map((r) => ({ subject: String(r[0]).trim(), name: String(r[1]).trim() }))
+    .filter((t) => t.name && !seen[t.name] && (seen[t.name] = true));
 }
 
 /** '김민수(국어)' → {name: '김민수', subject: '국어'} */
@@ -986,6 +998,7 @@ function sheetDefs_() {
   { name: SHEETS.DRAW, headers: ['학생번호', '일퀘올클여부', '도장12개여부', '뽑기횟수', '뽑기완료횟수'], textCols: [1] },
   { name: SHEETS.TIMETABLE, headers: TIMETABLE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7], widths: [60, 80, 80, 80, 80, 80, 80] },
   { name: SHEETS.TT_OVERRIDE, headers: TT_OVERRIDE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
+  { name: SHEETS.TEACHERS, headers: ['과목', '선생님 이름'], textCols: [1, 2], widths: [100, 140] },
   ];
 }
 
@@ -995,7 +1008,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v4')) return;
+  if (!force && cache.get('schema_ok_v5')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -1015,13 +1028,19 @@ function ensureSchema_(force) {
       const rows = Math.max(sh.getMaxRows() - 1, 1);
       (def.textCols || []).forEach((c) => sh.getRange(2, c, rows, 1).setNumberFormat('@'));
     }
+    if (def.name === SHEETS.TEACHERS && sh.getLastRow() < 2) {
+      // 시간표에 나오는 과목을 미리 채워 둔다. 담임은 옆 칸에 선생님 이름만 적으면 된다
+      const subjects = [];
+      DEFAULT_TIMETABLE.forEach((r) => r.slice(2).forEach((x) => { if (x && subjects.indexOf(x) < 0) subjects.push(x); }));
+      sh.getRange(2, 1, subjects.length, 2).setValues(subjects.map((x) => [x, '']));
+    }
     if (def.name === SHEETS.TIMETABLE && sh.getLastRow() < 2) {
       sh.getRange(2, 1, DEFAULT_TIMETABLE.length, TIMETABLE_HEADERS.length).setValues(DEFAULT_TIMETABLE);
     }
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v4', '1', 21600);
+  cache.put('schema_ok_v5', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -1058,7 +1077,7 @@ function onOpen() {
 function onEdit(e) {
   try {
     const name = e && e.range && e.range.getSheet().getName();
-    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.TIMETABLE, SHEETS.TT_OVERRIDE].indexOf(name) >= 0) clearAllCaches_();
+    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.TIMETABLE, SHEETS.TT_OVERRIDE, SHEETS.TEACHERS].indexOf(name) >= 0) clearAllCaches_();
   } catch (err) {
     // 단순 트리거에서는 조용히 무시
   }
@@ -1177,7 +1196,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v4']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v5']);
   invalidateStats_();
 }
 

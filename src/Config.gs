@@ -17,6 +17,7 @@ const SHEETS = {
   DRAW: '뽑기',
   TIMETABLE: '시간표',
   TT_OVERRIDE: '시간표변경',
+  TEACHERS: '교과선생님',
 };
 
 // type: string | int | bool | date | dateList | list | code
@@ -35,7 +36,7 @@ const CONFIG_DEFS = [
   { key: 'praiseMinLength', label: '칭찬 최소 글자 수', type: 'int', def: 10, desc: '' },
   { key: 'bannedWords', label: '금지어 목록', type: 'list', def: '시발, 씨발, ㅅㅂ, ㅆㅂ, 병신, ㅂㅅ, 개새끼, 새끼, 존나, ㅈㄴ, 좆, 지랄, 닥쳐, 꺼져, 미친놈, 미친년', desc: '쉼표로 구분' },
   { key: 'teacherCode', label: '교과 선생님 공통 코드', type: 'code', def: '', desc: '4자리. 비우면 초기 세팅 때 자동 생성' },
-  { key: 'teachers', label: '교과 선생님 목록', type: 'list', def: '', desc: '쉼표로 구분, 이름(과목) 형식. 예: 김민수(국어), 이지은(수학)' },
+  { key: 'teachers', label: '교과 선생님 목록', type: 'list', def: '', desc: '(예비용) "교과선생님" 시트가 비어 있을 때만 사용. 이름(과목) 형식, 쉼표로 구분' },
   { key: 'adminCode', label: '담임 코드', type: 'code', def: '', desc: '담임 대시보드 입장 코드. 비우면 초기 세팅 때 자동 생성' },
   { key: 'accuseResultPublic', label: '지목 결과 공개', type: 'bool', def: false, desc: 'ON이면 검거 결과를 다른 투투에게 공개' },
   { key: 'periodCount', label: '교시 수', type: 'int', def: 6, desc: '교과 선생님 화면의 교시 버튼 개수' },
@@ -84,7 +85,8 @@ function readConfigFromSheet_() {
   });
   if (!cfg.schoolDays.length) cfg.schoolDays = weekdaysBetween_(cfg.startDate, cfg.endDate);
   cfg.rewards = [cfg.reward1, cfg.reward2, cfg.reward3, cfg.reward4, cfg.reward5];
-  cfg.teacherList = cfg.teachers.map(parseTeacher_);
+  const fromSheet = readTeacherSheet_();
+  cfg.teacherList = fromSheet.length ? fromSheet : cfg.teachers.map(parseTeacher_);
   return cfg;
 }
 
@@ -129,6 +131,16 @@ function setConfigValue_(key, value) {
   if (idx >= 0) sh.getRange(idx + 2, 2).setValue(toSheetValue_(d, value));
   else sh.appendRow([d.label, toSheetValue_(d, value), d.desc]);
   CacheService.getScriptCache().remove(CACHE_KEYS.CONFIG);
+}
+
+/** "교과선생님" 시트: 과목 | 선생님 이름 (이름이 빈 줄은 건너뜀) */
+function readTeacherSheet_() {
+  const sh = ss_().getSheetByName(SHEETS.TEACHERS);
+  if (!sh || sh.getLastRow() < 2) return [];
+  const seen = {};
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues()
+    .map((r) => ({ subject: String(r[0]).trim(), name: String(r[1]).trim() }))
+    .filter((t) => t.name && !seen[t.name] && (seen[t.name] = true));
 }
 
 /** '김민수(국어)' → {name: '김민수', subject: '국어'} */
