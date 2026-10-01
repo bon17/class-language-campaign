@@ -61,6 +61,18 @@ function adminSetRankLock(token, locked) {
   return buildAdminDashboard_();
 }
 
+/** 칭찬 숨김/해제 (숨기면 받은 칭찬함에서 사라짐. 일퀘 인정 여부는 기록장에서 따로 처리) */
+function adminSetPraiseHidden(token, id, hidden) {
+  requireAdmin_(token);
+  withLock_(() => {
+    const p = readPraise_().find((x) => x.id === String(id));
+    if (!p) throw new Error('칭찬을 찾을 수 없어요.');
+    sheet_(SHEETS.PRAISE).getRange(p.row, 6).setValue(!!hidden);
+    invalidateStats_();
+  });
+  return buildAdminDashboard_();
+}
+
 function buildAdminDashboard_() {
   const cfg = getConfig();
   const { students, records, stats } = buildDataBundle_();
@@ -87,7 +99,35 @@ function buildAdminDashboard_() {
     period: r.period, subject: r.subject, memo: r.memo, cancelled: r.cancelled, cancelReason: r.cancelReason,
   }));
 
+  // 칭찬 전체 + 한 번도 못 받은 투투
+  const praises = readPraise_().reverse().map((p) => ({
+    id: p.id, ts: p.ts, date: p.date, from: p.from, fromName: nameOf[p.from] || p.from,
+    to: p.to, toName: nameOf[p.to] || p.to, text: p.text, hidden: p.hidden, thanked: p.thanked,
+  }));
+  const received = new Set(praises.filter((p) => !p.hidden).map((p) => p.to));
+  const noPraise = students.filter((s) => !received.has(s.no)).map((s) => ({ no: s.no, name: s.name }));
+
+  // 날짜 × 투투 일퀘 달성표: O(도장 지급) / 진행 중인 항목 수
+  const questO = {};
+  records.forEach((r) => { if (!r.cancelled && r.mission === '일퀘' && r.score > 0) questO[r.no + '|' + r.date] = true; });
+  const questRows = {};
+  readQuestRows_().forEach((q) => (questRows[q.no + '|' + q.date] = q));
+  const questGrid = students.map((s) => ({
+    no: s.no, name: s.name,
+    cells: cfg.schoolDays.map((d) => {
+      const k = s.no + '|' + d;
+      if (questO[k]) return { mark: 'O' };
+      const q = questRows[k];
+      if (!q) return { mark: '' };
+      const n = [q.praiseDone, q.greet.length >= 2, dozeStatus_(q, d).done].filter(Boolean).length;
+      return { mark: n + '/3', detail: `칭찬${q.praiseDone ? '✓' : '✗'} 인사 ${q.greet.join(', ') || '-'} 졸음${Object.values(q.doze).filter((v) => v === 'X').length}` };
+    }),
+  }));
+
   return {
+    praises,
+    noPraise,
+    questGrid,
     today,
     dayIndex: schoolDayIndex_(cfg, today),
     cfg: {

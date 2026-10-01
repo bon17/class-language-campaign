@@ -3,17 +3,56 @@
  * 담임은 스프레드시트 상단 [🚀 캠페인] 메뉴에서 실행한다.
  */
 
-const SHEET_DEFS = [
+/** 시트 정의 (다른 파일의 상수를 쓰므로 함수로 늦게 만든다) */
+function sheetDefs_() {
+  return [
   { name: SHEETS.CONFIG, headers: ['항목', '값', '설명'], textCols: [2], widths: [170, 420, 320] },
   { name: SHEETS.STUDENTS, headers: STUDENT_HEADERS, textCols: [1, 3], widths: [60, 100, 90] },
   { name: SHEETS.LEDGER, headers: LEDGER_HEADERS, textCols: [2, 3, 12] },
-  { name: SHEETS.QUEST, headers: ['날짜', '학생번호', '칭찬완료', '인사완료', '졸지않기완료', '도장지급여부'], textCols: [1, 2] },
-  { name: SHEETS.PRAISE, headers: ['타임스탬프', '날짜', '보낸번호', '받은번호', '내용', '숨김여부', '고마워여부'], textCols: [2, 3, 4] },
+  { name: SHEETS.QUEST, headers: QUEST_HEADERS, textCols: [1, 2, 7, 8, 9] },
+  { name: SHEETS.PRAISE, headers: PRAISE_HEADERS, textCols: [2, 3, 4, 8], widths: [140, 90, 70, 70, 360, 70, 70, 120] },
   { name: SHEETS.SPY, headers: ['주차', '학생번호', '시작일', '종료일', '상태'], textCols: [2, 3, 4] },
   { name: SHEETS.SPY_JUDGE, headers: ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위'], textCols: [1, 2, 3, 4, 5, 6, 7, 8] },
   { name: SHEETS.ACCUSE, headers: ['타임스탬프', '지목한번호', '지목된번호', '결과'], textCols: [2, 3] },
   { name: SHEETS.DRAW, headers: ['학생번호', '일퀘올클여부', '도장12개여부', '뽑기횟수', '뽑기완료횟수'], textCols: [1] },
-];
+  { name: SHEETS.TIMETABLE, headers: TIMETABLE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7], widths: [60, 80, 80, 80, 80, 80, 80] },
+  { name: SHEETS.TT_OVERRIDE, headers: TT_OVERRIDE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
+  ];
+}
+
+/**
+ * 시트가 없으면 만들고, 헤더가 예전 버전(앞부분만 있음)이면 새 열 이름을 이어 붙인다.
+ * 웹앱 요청에서도 호출되므로 6시간에 한 번만 실제로 검사한다.
+ */
+function ensureSchema_(force) {
+  const cache = CacheService.getScriptCache();
+  if (!force && cache.get('schema_ok_v3')) return;
+  const ss = ss_();
+  sheetDefs_().forEach((def) => {
+    let sh = ss.getSheetByName(def.name);
+    let created = false;
+    if (!sh) {
+      sh = ss.insertSheet(def.name);
+      created = true;
+    }
+    const n = def.headers.length;
+    const first = sh.getRange(1, 1, 1, n).getValues()[0].map((v) => String(v).trim());
+    const filled = first.filter((v) => v !== '').length;
+    const isPrefix = first.slice(0, filled).every((v, i) => v === def.headers[i]);
+    if (filled === 0 || (isPrefix && filled < n)) {
+      sh.getRange(1, 1, 1, n).setValues([def.headers]);
+      sh.getRange(1, 1, 1, n).setFontWeight('bold').setBackground('#13294b').setFontColor('#ffffff');
+      sh.setFrozenRows(1);
+      const rows = Math.max(sh.getMaxRows() - 1, 1);
+      (def.textCols || []).forEach((c) => sh.getRange(2, c, rows, 1).setNumberFormat('@'));
+    }
+    if (def.name === SHEETS.TIMETABLE && sh.getLastRow() < 2) {
+      sh.getRange(2, 1, DEFAULT_TIMETABLE.length, TIMETABLE_HEADERS.length).setValues(DEFAULT_TIMETABLE);
+    }
+    if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  });
+  cache.put('schema_ok_v3', '1', 21600);
+}
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -31,7 +70,7 @@ function onOpen() {
 function onEdit(e) {
   try {
     const name = e && e.range && e.range.getSheet().getName();
-    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER].indexOf(name) >= 0) clearAllCaches_();
+    if ([SHEETS.CONFIG, SHEETS.STUDENTS, SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.TIMETABLE, SHEETS.TT_OVERRIDE].indexOf(name) >= 0) clearAllCaches_();
   } catch (err) {
     // 단순 트리거에서는 조용히 무시
   }
@@ -41,15 +80,10 @@ function setupSheets() {
   const ss = SpreadsheetApp.getActive();
   PropertiesService.getScriptProperties().setProperty('SS_ID', ss.getId());
 
-  let studentsCreated = false;
-  SHEET_DEFS.forEach((def) => {
-    let sh = ss.getSheetByName(def.name);
-    if (!sh) {
-      sh = ss.insertSheet(def.name);
-      if (def.name === SHEETS.STUDENTS) studentsCreated = true;
-    }
-    const first = sh.getRange(1, 1, 1, def.headers.length).getValues()[0];
-    if (first.every((v) => v === '')) sh.getRange(1, 1, 1, def.headers.length).setValues([def.headers]);
+  const studentsCreated = !ss.getSheetByName(SHEETS.STUDENTS);
+  ensureSchema_(true);
+  sheetDefs_().forEach((def) => {
+    const sh = ss.getSheetByName(def.name);
     sh.getRange(1, 1, 1, def.headers.length).setFontWeight('bold').setBackground('#13294b').setFontColor('#ffffff');
     sh.setFrozenRows(1);
     const rows = Math.max(sh.getMaxRows() - 1, 1);
@@ -155,7 +189,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS]);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v3']);
   invalidateStats_();
 }
 

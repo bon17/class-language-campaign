@@ -33,6 +33,8 @@
 
     <div class="tabs" id="tabs">
       <button class="tab on" data-tab="overview">📊 현황</button>
+      <button class="tab" data-tab="quest">✅ 일퀘</button>
+      <button class="tab" data-tab="praise">💌 칭찬</button>
       <button class="tab" data-tab="manual">✍️ 도장 입력</button>
       <button class="tab" data-tab="ledger">📜 기록장</button>
       <button class="tab" data-tab="settings">⚙️ 설정</button>
@@ -49,6 +51,29 @@
       </div>
       <div class="table-wrap" style="margin-top:10px"><table id="statsTable"></table></div>
       <p class="muted">총점 = 기록장에서 취소되지 않은 모든 점수의 합(차감 포함). 동점은 공동 순위입니다.</p>
+    </div>
+
+    <!-- 일퀘 달성표 -->
+    <div id="tab-quest" class="box hidden" style="margin-top:0">
+      <h2 class="title-font">날짜 × 투투 일퀘 달성표</h2>
+      <p class="muted">O = 도장 지급 · 2/3 = 진행 중(칸을 누르면 상세) · 빈칸 = 기록 없음</p>
+      <div class="table-wrap"><table id="questTable"></table></div>
+      <div id="questDetail" class="muted" style="margin-top:8px"></div>
+    </div>
+
+    <!-- 칭찬 -->
+    <div id="tab-praise" class="box hidden" style="margin-top:0">
+      <h2 class="title-font">칭찬 한 번도 못 받은 투투</h2>
+      <div id="noPraise"></div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">전체 칭찬</h2>
+      <div class="row">
+        <select id="pDate" class="grow"></select>
+        <select id="pFrom" class="grow"></select>
+        <select id="pTo" class="grow"></select>
+      </div>
+      <p class="muted">숨기면 받은 칭찬함에서 사라집니다. 일퀘 인정 여부는 기록장 탭에서 해당 "일퀘" 기록을 취소해 처리하세요.</p>
+      <div id="praiseList"></div>
     </div>
 
     <!-- 수동 도장 -->
@@ -217,7 +242,7 @@
     const d = S.data;
     if (!d) return;
     $('stamp').textContent = `마지막 계산: ${d.computedAt}`;
-    renderOverview(); renderManual(); renderLedger(); renderSettings();
+    renderOverview(); renderQuest(); renderPraise(); renderManual(); renderLedger(); renderSettings();
   }
 
   function renderOverview() {
@@ -247,6 +272,49 @@
         <td class="yellow" style="font-weight:900;font-size:16px">${s.total}</td></tr>`;
     }).join('');
     $('statsTable').innerHTML = head + (rows || `<tr><td colspan="99" class="muted">학생 시트에 명단을 넣어 주세요.</td></tr>`);
+  }
+
+  function renderQuest() {
+    const d = S.data;
+    const head = `<tr><th class="left">이름</th>${d.cfg.schoolDays.map((x) => `<th>${esc(x.slice(5))}</th>`).join('')}<th>O</th></tr>`;
+    const body = d.questGrid.map((r) => {
+      const cnt = r.cells.filter((c) => c.mark === 'O').length;
+      return `<tr><td class="left">${esc(r.no)}. ${esc(r.name)}</td>${r.cells.map((c, i) => {
+        const cls = c.mark === 'O' ? 'plus' : c.mark ? 'yellow' : 'muted';
+        return `<td class="${cls}" ${c.detail ? `data-qd="${esc(r.name + ' ' + d.cfg.schoolDays[i].slice(5) + ': ' + c.detail)}" style="cursor:pointer;text-decoration:underline dotted"` : ''}>${esc(c.mark || '·')}</td>`;
+      }).join('')}<td class="yellow" style="font-weight:900">${cnt}</td></tr>`;
+    }).join('');
+    $('questTable').innerHTML = head + body;
+  }
+
+  function renderPraise() {
+    const d = S.data;
+    $('noPraise').innerHTML = d.noPraise.length
+      ? `<div class="chips">${d.noPraise.map((s) => `<span class="chip" style="cursor:default">${esc(s.no)}. ${esc(s.name)}</span>`).join('')}</div>`
+      : '<p class="muted">모든 투투가 칭찬을 받았어요! 🎉</p>';
+    const keep = { d: $('pDate').value, f: $('pFrom').value, t: $('pTo').value };
+    const studentOpts = d.students.slice().sort((a, b) => Number(a.no) - Number(b.no))
+      .map((s) => `<option value="${esc(s.no)}">${esc(s.no)}. ${esc(s.name)}</option>`).join('');
+    $('pDate').innerHTML = `<option value="">전체 날짜</option>` + d.cfg.schoolDays.map((x) => `<option value="${x}">${x.slice(5)}</option>`).join('');
+    $('pFrom').innerHTML = `<option value="">보낸 사람 전체</option>` + studentOpts;
+    $('pTo').innerHTML = `<option value="">받은 사람 전체</option>` + studentOpts;
+    $('pDate').value = keep.d; $('pFrom').value = keep.f; $('pTo').value = keep.t;
+    const list = d.praises.filter((p) => (!keep.d || p.date === keep.d) && (!keep.f || p.from === keep.f) && (!keep.t || p.to === keep.t));
+    $('praiseList').innerHTML = list.length ? list.map((p) => `<div class="card" style="margin-top:8px;${p.hidden ? 'opacity:.5' : ''}">
+        <div class="row" style="align-items:flex-start">
+          <div class="grow"><b class="sky">${esc(p.fromName)}</b> → <b class="yellow">${esc(p.toName)}</b>
+            <span class="muted">${esc(p.date.slice(5))}${p.thanked ? ' · 💗고마워' : ''}${p.hidden ? ' · 숨김' : ''}</span>
+            <div style="margin-top:4px;white-space:pre-wrap;word-break:break-word">${esc(p.text)}</div></div>
+          <button class="btn sm ${p.hidden ? 'ghost' : 'danger'}" style="flex:0 0 auto" data-hide="${esc(p.id)}" data-hidden="${p.hidden ? 1 : 0}">${p.hidden ? '보이기' : '숨기기'}</button>
+        </div></div>`).join('') : '<p class="muted">칭찬이 없어요.</p>';
+  }
+
+  async function togglePraise(id, hidden) {
+    const ok = await modal({ title: hidden ? '칭찬 숨기기' : '칭찬 다시 보이기',
+      html: hidden ? '<p>받은 칭찬함에서 사라집니다. 일퀘 도장은 그대로이니 필요하면 기록장에서 취소하세요.</p>' : '<p>받은 칭찬함에 다시 보입니다.</p>' });
+    if (!ok) return;
+    try { setData(await call('adminSetPraiseHidden', S.token, id, hidden)); toast(hidden ? '숨겼어요.' : '다시 보이게 했어요.'); }
+    catch (e) { toast(e.message, true); }
   }
 
   function renderManual() {
@@ -309,7 +377,7 @@
   function switchTab(tab) {
     S.tab = tab;
     document.querySelectorAll('#tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-    ['overview', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
+    ['overview', 'quest', 'praise', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
   }
 
   async function submitManual() {
@@ -387,6 +455,9 @@
   };
   $('scoreQuick').onclick = (e) => { const b = e.target.closest('[data-score]'); if (b) $('mScore').value = b.dataset.score; };
   $('ledgerTable').onclick = (e) => { const b = e.target.closest('[data-cancel]'); if (b) cancelRecord(b.dataset.cancel); };
+  ['pDate', 'pFrom', 'pTo'].forEach((id) => $(id).addEventListener('change', renderPraise));
+  $('praiseList').onclick = (e) => { const b = e.target.closest('[data-hide]'); if (b) togglePraise(b.dataset.hide, b.dataset.hidden !== '1'); };
+  $('questTable').onclick = (e) => { const c = e.target.closest('[data-qd]'); if (c) $('questDetail').textContent = c.dataset.qd; };
   ['lFilter', 'lMission', 'lCancelled'].forEach((id) => $(id).addEventListener('change', renderLedger));
 
   // 60초마다 자동 갱신 (입력 중인 탭·모달이 열려 있으면 건너뜀)

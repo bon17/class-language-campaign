@@ -173,7 +173,7 @@ function getStudentHistory_(no) {
   const key = `hist_${dataVersion_()}_${todayStr_()}_${no}`;
   const hit = CacheService.getScriptCache().get(key);
   if (hit) return JSON.parse(hit);
-  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {} };
+  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praisedNos: [], inbox: [], quest: null };
 }
 
 /**
@@ -181,6 +181,7 @@ function getStudentHistory_(no) {
  * 담임 대시보드처럼 원본이 필요한 곳은 반환값의 students/records를 그대로 쓴다.
  */
 function buildDataBundle_() {
+  ensureSchema_();
   const cfg = getConfig();
   const today = todayStr_();
   const ver = dataVersion_();
@@ -198,17 +199,26 @@ function buildDataBundle_() {
 
   const nameOf = {};
   students.forEach((s) => (nameOf[s.no] = s.name));
+  const blank = () => ({ records: [], questDates: [], praiseTo: {}, praisedNos: [], inbox: [], quest: null });
   const hist = {};
-  students.forEach((s) => (hist[s.no] = { records: [], questDates: [], praiseTo: {} }));
+  students.forEach((s) => (hist[s.no] = blank()));
   records.forEach((r) => {
     const h = hist[r.no];
     if (!h || r.cancelled) return;
     h.records.push({ date: r.date, mission: r.mission, score: r.score, period: r.period, subject: r.subject });
     if (r.mission === '일퀘' && r.score > 0) h.questDates.push(r.date);
   });
-  readPraiseSent_().forEach((p) => {
-    const h = hist[p.from];
-    if (h && !h.praiseTo[p.date]) h.praiseTo[p.date] = nameOf[p.to] || '';
+  readPraise_().forEach((p) => {
+    const from = hist[p.from];
+    if (from) {
+      if (!from.praiseTo[p.date]) from.praiseTo[p.date] = nameOf[p.to] || '';
+      from.praisedNos.push(p.to);
+    }
+    const to = hist[p.to];
+    if (to && !p.hidden) to.inbox.unshift({ id: p.id, date: p.date, fromName: nameOf[p.from] || '친구', text: p.text, thanked: p.thanked });
+  });
+  readQuestRows_().forEach((q) => {
+    if (q.date === today && hist[q.no]) hist[q.no].quest = { praiseDone: q.praiseDone, stamped: q.stamped, greet: q.greet, doze: q.doze };
   });
 
   const put = {};
@@ -220,15 +230,6 @@ function buildDataBundle_() {
     // 캐시 용량 초과 등은 무시 (다음 요청에서 다시 계산)
   }
   return { students, records, stats, hist };
-}
-
-/** 칭찬 시트에서 (날짜, 보낸번호, 받은번호)만 읽는다. 3단계 전에는 비어 있다. */
-function readPraiseSent_() {
-  const sh = ss_().getSheetByName(SHEETS.PRAISE);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 2, sh.getLastRow() - 1, 3).getValues()
-    .map((r) => ({ date: toDateStr_(r[0]), from: String(r[1]).trim(), to: String(r[2]).trim() }))
-    .filter((p) => p.date && p.from);
 }
 
 /**

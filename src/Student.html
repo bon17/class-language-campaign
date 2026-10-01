@@ -99,6 +99,40 @@
     .rec .d { color: var(--muted); width: 52px; flex: 0 0 auto; }
     .rec .l { flex: 1; }
     details summary { cursor: pointer; color: var(--sky); font-weight: 700; padding: 6px 0; }
+    /* 시간표 */
+    .tt { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 6px; }
+    .tt div { background: #0a1a33; border: 1px solid var(--navy-line); border-radius: 10px; padding: 6px 4px; text-align: center; }
+    .tt b { display: block; font-size: 15px; color: var(--text); }
+    .tt small { color: var(--muted); font-size: 11px; }
+
+    /* 오늘의 퀘스트 */
+    .quest { background: #0a1a33; border: 1px solid var(--navy-line); border-radius: 12px; padding: 12px; margin-top: 10px; }
+    .quest.done { border-color: var(--green); box-shadow: 0 0 10px #4ade8044; }
+    .quest.fail { border-color: var(--red); }
+    .quest .qh { display: flex; align-items: center; gap: 8px; font-weight: 900; font-size: 17px; }
+    .quest .qh .st { margin-left: auto; font-size: 13px; padding: 2px 10px; border-radius: 999px; background: #20314f; color: var(--muted); white-space: nowrap; }
+    .quest.done .qh .st { background: var(--green); color: #052e16; }
+    .quest.fail .qh .st { background: var(--red); color: #fff; }
+    .chip:disabled { opacity: .35; cursor: not-allowed; text-decoration: line-through; }
+    .greeted { display: inline-flex; align-items: center; gap: 6px; background: #13294b; border: 1px solid var(--sky); border-radius: 999px; padding: 6px 6px 6px 12px; margin: 4px 6px 0 0; }
+    .greeted button { appearance: none; border: 0; background: #ffffff22; color: #fff; border-radius: 50%; width: 26px; height: 26px; cursor: pointer; }
+    .dz { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid #ffffff10; }
+    .dz .p { flex: 1; font-size: 15px; }
+    .dz .p small { color: var(--muted); }
+    .dz button { appearance: none; font: inherit; font-size: 14px; cursor: pointer; border-radius: 10px; min-height: 40px; padding: 4px 8px; border: 1px solid var(--navy-line); background: #081427; color: var(--muted); }
+    .dz button.on.o { background: #1a9b4b; color: #fff; border-color: #1a9b4b; }
+    .dz button.on.x { background: #d64545; color: #fff; border-color: #d64545; }
+    .counter { text-align: right; font-size: 12px; color: var(--muted); }
+    .stamp-done { text-align: center; font-size: 20px; font-weight: 900; color: var(--yellow); padding: 8px 0; }
+
+    /* 받은 칭찬함 */
+    .letter { background: linear-gradient(180deg, #fff8e6, #ffeccc); color: #3b2a12; border-radius: 12px; padding: 12px 14px; margin-top: 8px; }
+    .letter .from { font-weight: 900; color: #b4531a; }
+    .letter .d { color: #8a6d4b; font-size: 12px; }
+    .letter .txt { margin: 6px 0 8px; white-space: pre-wrap; word-break: break-word; }
+    .thanks { appearance: none; font: inherit; cursor: pointer; border: 0; border-radius: 999px; padding: 6px 14px; background: #ff7aa8; color: #fff; font-weight: 700; }
+    .thanks:disabled { background: #e8c6d3; color: #8a5b6c; cursor: default; }
+
     .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .topbar .hi { flex: 1; font-weight: 700; }
     .topbar .hi b { color: var(--yellow); }
@@ -135,6 +169,48 @@
     <!-- 랭킹 -->
     <div class="box" id="rankBox"></div>
 
+    <!-- 오늘의 시간표 + 퀘스트 -->
+    <div class="box" id="questBox">
+      <h2 class="title-font">📅 오늘의 시간표</h2>
+      <div class="tt" id="tt"></div>
+      <div class="muted" id="ttMemo" style="margin-top:6px"></div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">⭐ 오늘의 퀘스트</h2>
+      <div id="questStatus"></div>
+
+      <div class="quest" id="qPraise">
+        <div class="qh">💌 친구에게 칭찬 1회 <span class="st" id="qPraiseSt"></span></div>
+        <div id="praiseDone" class="hidden" style="margin-top:8px"></div>
+        <div id="praiseForm">
+          <label>칭찬할 친구 (한 번 칭찬한 친구는 다시 고를 수 없어요)</label>
+          <div class="chips" id="friendChips"></div>
+          <label for="praiseText">칭찬 문장</label>
+          <textarea id="praiseText" rows="3" maxlength="200" placeholder="친구의 멋진 점을 구체적으로 써 주세요!"></textarea>
+          <div class="counter" id="praiseCount"></div>
+          <button class="btn yellow block" id="praiseBtn" style="margin-top:8px">칭찬 보내기 💌</button>
+        </div>
+      </div>
+
+      <div class="quest" id="qGreet">
+        <div class="qh">🙇 복도에서 선생님께 인사 2회 <span class="st" id="qGreetSt"></span></div>
+        <div id="greetList" style="margin-top:6px"></div>
+        <div id="greetForm">
+          <label>인사한 선생님 (서로 다른 선생님 2분)</label>
+          <div class="chips" id="teacherChips"></div>
+          <div class="row" style="margin-top:8px">
+            <input id="greetInput" type="text" maxlength="20" placeholder="목록에 없으면 직접 입력 (예: 교장선생님)" class="grow">
+            <button class="btn sm" id="greetBtn" style="flex:0 0 auto;min-height:46px">추가</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="quest" id="qDoze">
+        <div class="qh">😴 수업 시간에 졸지 않기 <span class="st" id="qDozeSt"></span></div>
+        <div class="muted" id="dozeHelp" style="margin:4px 0"></div>
+        <div id="dozeList"></div>
+      </div>
+    </div>
+
     <!-- 도장판 -->
     <div class="space">
       <span class="deco" style="left:10px;top:70px">🪐</span>
@@ -168,6 +244,13 @@
       </table>
     </div>
 
+    <!-- 받은 칭찬함 -->
+    <div class="box">
+      <h2 class="title-font">💌 받은 칭찬함</h2>
+      <div id="inbox"></div>
+      <p class="muted" style="margin-bottom:0">받은 칭찬은 나만 볼 수 있어요.</p>
+    </div>
+
     <!-- 수업 싸인판 -->
     <div class="space">
       <h2 class="bubble-title" id="signTitle"></h2>
@@ -189,7 +272,7 @@
 <div id="toast"></div>
 
 <script>
-  const S = { token: null, data: null, lastTotal: null, busy: false };
+  const S = { token: null, data: null, lastTotal: null, busy: false, acting: false, seq: 0, appliedSeq: 0, praiseTo: '' };
   const $ = (id) => document.getElementById(id);
   const WD = ['일', '월', '화', '수', '목', '금', '토'];
   const PLANET_ROWS = [3, 5, 6, 5, 4]; // 종이 도장판과 같은 23칸
@@ -247,16 +330,32 @@
     $('login').classList.remove('hidden');
   }
   async function refresh(quiet) {
-    if (!S.token || S.busy) return;
+    if (!S.token || S.busy || S.acting) return;
     S.busy = true;
+    const my = ++S.seq;
     try {
       const d = await call('studentGetHome', S.token);
-      S.data = d;
-      $('login').classList.add('hidden');
-      $('app').classList.remove('hidden');
-      render();
+      if (my >= S.appliedSeq) { S.appliedSeq = my; apply(d); }
     } catch (e) { if (!quiet || !S.token) toast(e.message, true); }
     S.busy = false;
+  }
+
+  function apply(d) {
+    S.data = d;
+    $('login').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    render();
+    if (d.notice) toast(d.notice);
+  }
+
+  /** 퀘스트 입력 동작: 서버가 갱신된 화면 데이터를 돌려준다 */
+  async function act(fn, ...args) {
+    if (S.acting) return false;
+    S.acting = true;
+    const my = ++S.seq;
+    try { const d = await call(fn, S.token, ...args); S.appliedSeq = my; apply(d); return true; }
+    catch (e) { toast(e.message, true); return false; }
+    finally { S.acting = false; }
   }
 
   // ---------- 렌더 ----------
@@ -266,11 +365,13 @@
     $('hi').innerHTML = `🚀 <b>${esc(d.me.name)}</b> ${esc(nick)}, 안녕!` +
       `<div class="muted">${md(d.today)}(${wd(d.today)}) · ${d.dayIndex ? `${d.dayIndex}/${d.dayCount}일차` : '등교일이 아니에요'}</div>`;
     renderRanking(d);
+    renderToday(d);
     renderBoard(d);
     renderSummary(d);
     renderQuest(d);
     renderSigns(d);
     renderRecords(d);
+    renderInbox(d);
     $('stamp').textContent = `마지막 갱신 ${d.serverTime} · 30초마다 자동 갱신`;
   }
 
@@ -388,6 +489,69 @@
     $('signs').innerHTML = html;
   }
 
+  function renderToday(d) {
+    $('tt').innerHTML = d.timetable.length
+      ? d.timetable.map((p) => `<div><small>${p.period}교시${p.start ? ' ' + esc(p.start) : ''}</small><b>${esc(p.subject)}</b></div>`).join('')
+      : '<p class="muted" style="margin:0">오늘은 수업이 없어요.</p>';
+    $('ttMemo').textContent = d.timetableMemo ? '📌 ' + d.timetableMemo : '';
+
+    const q = d.todayQuest;
+    const locked = !q.available || q.stamped;
+    $('questStatus').innerHTML = !q.available
+      ? '<p class="muted">오늘은 캠페인 등교일이 아니라서 퀘스트를 입력할 수 없어요.</p>'
+      : q.stamped ? '<div class="stamp-done">🎉 오늘 일퀘 완료! 도장 +1</div>'
+      : '<p class="muted" style="margin:0">3가지를 모두 완료하면 도장 +1 (양심에 따라 체크해요!)</p>';
+
+    // 칭찬
+    $('qPraise').className = 'quest' + (q.praise.done ? ' done' : '');
+    $('qPraiseSt').textContent = q.praise.done ? '완료' : '0/1';
+    $('praiseDone').classList.toggle('hidden', !q.praise.done);
+    $('praiseDone').innerHTML = q.praise.done ? `✅ 오늘은 <b class="yellow">${esc(q.praise.toName)}</b>에게 칭찬했어요!` : '';
+    $('praiseForm').classList.toggle('hidden', q.praise.done || !q.available);
+    $('friendChips').innerHTML = d.friends.map((f) =>
+      `<button class="chip ${S.praiseTo === f.no ? 'on' : ''}" data-friend="${esc(f.no)}" ${f.praised ? 'disabled' : ''}>${esc(f.name)}</button>`).join('');
+    updatePraiseCount();
+
+    // 인사
+    const g = q.greet;
+    $('qGreet').className = 'quest' + (g.done ? ' done' : '');
+    $('qGreetSt').textContent = g.done ? '완료' : `${g.list.length}/2`;
+    $('greetList').innerHTML = g.list.map((t, i) =>
+      `<span class="greeted">🙇 ${esc(t)} ${locked ? '' : `<button data-ungreet="${i}" aria-label="지우기">×</button>`}</span>`).join('');
+    $('greetForm').classList.toggle('hidden', locked || g.list.length >= 2);
+    $('teacherChips').innerHTML = d.teachers.filter((t) => g.list.indexOf(t) < 0)
+      .map((t) => `<button class="chip" data-teacher="${esc(t)}">${esc(t)}</button>`).join('');
+
+    // 졸지 않기
+    const z = q.doze;
+    $('qDoze').className = 'quest' + (z.done ? ' done' : z.failed ? ' fail' : '');
+    $('qDozeSt').textContent = z.done ? '완료' : z.failed ? '실패' : `${z.answered}/${z.periods.length}`;
+    $('dozeHelp').innerHTML = `교시마다 골라 주세요. 😴 졸았어요가 <b>${z.allowed}개 이하</b>면 성공! (지금 😴 ${z.dozed}개)`;
+    $('dozeList').innerHTML = z.periods.map((p) => `<div class="dz">
+        <div class="p">${p.period}교시 <small>${esc(p.subject)}</small></div>
+        <button class="o ${p.val === 'O' ? 'on' : ''}" data-doze="${p.period}" data-val="O" ${locked ? 'disabled' : ''}>😊 안 졸았어요</button>
+        <button class="x ${p.val === 'X' ? 'on' : ''}" data-doze="${p.period}" data-val="X" ${locked ? 'disabled' : ''}>😴 졸았어요</button>
+      </div>`).join('');
+  }
+
+  function updatePraiseCount() {
+    const d = S.data;
+    if (!d) return;
+    const n = $('praiseText').value.replace(/\s/g, '').length;
+    $('praiseCount').textContent = `${n}자 / 최소 ${d.praiseMinLength}자`;
+    $('praiseCount').style.color = n >= d.praiseMinLength ? 'var(--green)' : '';
+  }
+
+  function renderInbox(d) {
+    $('inbox').innerHTML = d.inbox.length
+      ? d.inbox.map((p) => `<div class="letter">
+          <div><span class="from">From. ${esc(p.fromName)}</span> <span class="d">${md(p.date)}</span></div>
+          <div class="txt">${esc(p.text)}</div>
+          <button class="thanks" data-thank="${esc(p.id)}" ${p.thanked ? 'disabled' : ''}>${p.thanked ? '💗 고마워 보냄' : '💗 고마워'}</button>
+        </div>`).join('')
+      : '<p class="muted">아직 받은 칭찬이 없어요. 먼저 친구를 칭찬해 볼까요?</p>';
+  }
+
   function renderRecords(d) {
     const line = (r) => `<div class="rec"><span class="d">${md(r.date)}</span><span class="l">${esc(r.label)}</span>
       <span class="${r.score < 0 ? 'minus' : 'plus'}">${signed(r.score)}</span></div>`;
@@ -402,6 +566,35 @@
   $('loginBtn').onclick = login;
   $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
   $('refreshBtn').onclick = () => refresh(false);
+  $('friendChips').onclick = (e) => {
+    const b = e.target.closest('[data-friend]');
+    if (!b || b.disabled) return;
+    S.praiseTo = b.dataset.friend;
+    document.querySelectorAll('#friendChips .chip').forEach((c) => c.classList.toggle('on', c === b));
+  };
+  $('praiseText').addEventListener('input', updatePraiseCount);
+  $('praiseBtn').onclick = async () => {
+    const d = S.data, text = $('praiseText').value.trim();
+    if (!S.praiseTo) return toast('칭찬할 친구를 골라 주세요.', true);
+    if (text.replace(/\s/g, '').length < d.praiseMinLength) return toast(`칭찬은 ${d.praiseMinLength}자 이상 써 주세요.`, true);
+    $('praiseBtn').disabled = true;
+    if (await act('praiseSubmit', S.praiseTo, text)) { $('praiseText').value = ''; S.praiseTo = ''; }
+    $('praiseBtn').disabled = false;
+  };
+  $('teacherChips').onclick = (e) => { const b = e.target.closest('[data-teacher]'); if (b) act('questGreet', b.dataset.teacher); };
+  $('greetBtn').onclick = async () => {
+    const v = $('greetInput').value.trim();
+    if (!v) return toast('선생님 이름을 입력해 주세요.', true);
+    if (await act('questGreet', v)) $('greetInput').value = '';
+  };
+  $('greetList').onclick = (e) => { const b = e.target.closest('[data-ungreet]'); if (b) act('questUngreet', Number(b.dataset.ungreet)); };
+  $('dozeList').onclick = (e) => {
+    const b = e.target.closest('[data-doze]');
+    if (!b || b.disabled) return;
+    const val = b.classList.contains('on') ? '' : b.dataset.val; // 같은 버튼을 다시 누르면 선택 취소
+    act('questDoze', Number(b.dataset.doze), val);
+  };
+  $('inbox').onclick = (e) => { const b = e.target.closest('[data-thank]'); if (b && !b.disabled) act('praiseThank', b.dataset.thank); };
   $('logoutBtn').onclick = logoutLocal;
 
   setInterval(() => { if (S.token && document.visibilityState === 'visible') refresh(true); }, 30000);

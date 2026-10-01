@@ -15,6 +15,8 @@ const SHEETS = {
   SPY_JUDGE: '암행어사판정',
   ACCUSE: '지목',
   DRAW: '뽑기',
+  TIMETABLE: '시간표',
+  TT_OVERRIDE: '시간표변경',
 };
 
 // type: string | int | bool | date | dateList | list | code
@@ -29,6 +31,7 @@ const CONFIG_DEFS = [
   { key: 'rankPublicCount', label: '랭킹 공개 인원', type: 'int', def: 5, desc: '투투 화면에 공개할 상위 인원' },
   { key: 'rankLocked', label: '랭킹 잠금', type: 'bool', def: false, desc: 'ON이면 투투 화면에 "랭킹 공개 전입니다"' },
   { key: 'drawStampThreshold', label: '뽑기 도장 기준', type: 'int', def: 12, desc: '순합계가 이 이상이면 뽑기 1회' },
+  { key: 'dozeAllowed', label: '졸음 허용 횟수', type: 'int', def: 3, desc: '졸지 않기: 😴 졸았어요가 이 횟수 이하면 성공' },
   { key: 'praiseMinLength', label: '칭찬 최소 글자 수', type: 'int', def: 10, desc: '' },
   { key: 'bannedWords', label: '금지어 목록', type: 'list', def: '시발, 씨발, ㅅㅂ, ㅆㅂ, 병신, ㅂㅅ, 개새끼, 새끼, 존나, ㅈㄴ, 좆, 지랄, 닥쳐, 꺼져, 미친놈, 미친년', desc: '쉼표로 구분' },
   { key: 'teacherCode', label: '교과 선생님 공통 코드', type: 'code', def: '', desc: '4자리. 비우면 초기 세팅 때 자동 생성' },
@@ -43,7 +46,7 @@ const CONFIG_DEFS = [
   { key: 'reward5', label: '5위 보상', type: 'string', def: '간식 + 청소 면제권 1장', desc: '' },
 ];
 
-const CACHE_KEYS = { CONFIG: 'config_v1', STUDENTS: 'students_v1' };
+const CACHE_KEYS = { CONFIG: 'config_v1', STUDENTS: 'students_v1', TIMETABLE: 'timetable_v1' };
 
 /** 스프레드시트 핸들. 초기 세팅 때 ID를 저장해 두면 웹앱에서도 확실히 같은 파일을 연다. */
 function ss_() {

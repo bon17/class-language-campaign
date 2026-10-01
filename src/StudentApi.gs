@@ -92,6 +92,26 @@ function buildStudentHome_(me) {
     else break;
   }
 
+  // 오늘의 시간표·퀘스트
+  const isSchoolDay = cfg.schoolDays.indexOf(today) >= 0;
+  const q = hist.quest || { praiseDone: false, stamped: false, greet: [], doze: {} };
+  const dz = dozeStatus_(q, today);
+  const sentToday = hist.praiseTo[today];
+  const praised = new Set(hist.praisedNos);
+  const todayQuest = {
+    available: isSchoolDay,
+    stamped: q.stamped || questSet.has(today),
+    praise: { done: q.praiseDone || !!sentToday, toName: sentToday || '' },
+    greet: { list: q.greet, done: q.greet.length >= 2 && q.greet[0] !== q.greet[1] },
+    doze: {
+      periods: dozePeriods_(today).map((p) => ({ period: p.period, subject: p.subject, val: q.doze[p.period] || '' })),
+      answered: dz.answered, dozed: dz.dozed, allowed: dz.allowed, done: dz.done, failed: dz.failed,
+    },
+  };
+  const friends = getStudentsCached_()
+    .filter((s) => s.no !== me.no)
+    .map((s) => ({ no: s.no, name: s.name, praised: praised.has(s.no) }));
+
   const allClear = cfg.schoolDays.length > 0 && cfg.schoolDays.every((d) => questSet.has(d));
   const stampGoal = mine.total >= cfg.drawStampThreshold;
 
@@ -118,6 +138,13 @@ function buildStudentHome_(me) {
     classSigns: hist.records
       .filter((r) => r.mission === '수업참여' || r.mission === 'MVP')
       .map((r) => ({ date: r.date, period: r.period, subject: r.subject, mvp: r.mission === 'MVP', score: r.score })),
+    timetable: timetableFor_(today),
+    timetableMemo: timetableMemo_(today),
+    todayQuest,
+    friends,
+    teachers: cfg.teacherList.map((t) => t.name),
+    praiseMinLength: cfg.praiseMinLength,
+    inbox: hist.inbox,
     serverTime: Utilities.formatDate(new Date(), TZ, 'HH:mm:ss'),
   };
 }
