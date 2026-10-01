@@ -32,11 +32,14 @@ ordered.forEach((n) => {
 parts.push('// ===================== HTML 화면 =====================');
 parts.push('const HTML_SOURCES = {');
 htmlFiles.forEach((f) => {
-  parts.push(`  ${JSON.stringify(f.slice(0, -5))}: ${JSON.stringify(fs.readFileSync(path.join(src, f), 'utf8'))},`);
+  // 긴 한 줄이 복사·붙여넣기에서 잘리지 않도록 여러 줄 템플릿 문자열로 넣는다
+  const html = fs.readFileSync(path.join(src, f), 'utf8').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+  parts.push(`  ${JSON.stringify(f.slice(0, -5))}: \`${html}\`,`);
 });
 parts.push('};');
 parts.push('');
 
 fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, parts.join('\n'));
-console.log(`dist/Code.gs 생성: .gs ${ordered.length}개 + .html ${htmlFiles.length}개, ${fs.statSync(out).size} bytes`);
+const lines = fs.readFileSync(out, 'utf8').split('\n');
+console.log(`dist/Code.gs 생성: .gs ${ordered.length}개 + .html ${htmlFiles.length}개, ${lines.length}줄, 가장 긴 줄 ${Math.max(...lines.map((l) => l.length))}자`);
