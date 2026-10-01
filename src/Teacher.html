@@ -165,7 +165,8 @@
     hideUndo();
     try { S.init = await call('teacherInit', S.token); } catch (e) { return toast(e.message, true); }
     const d = S.init;
-    S.period = d.suggestedPeriod || S.period || 1;
+    S.period = d.suggestedPeriod || S.period || (d.periods.find((p) => !p.excluded) || { period: 1 }).period;
+    if ((d.periods.find((p) => p.period === S.period) || {}).excluded) S.period = (d.periods.find((p) => !p.excluded) || { period: 1 }).period;
     if (!S.teacher) S.teacher = load('lastTeacher') || '';
     if (d.teachers.length && !d.teachers.some((t) => t.name === S.teacher)) S.teacher = '';
     renderStart();
@@ -179,8 +180,8 @@
     $('teacherFree').classList.toggle('hidden', d.teachers.length > 0);
     $('nowText').textContent = `지금 ${d.now}${d.suggestedPeriod ? ` → ${d.suggestedPeriod}교시 자동 선택` : ''}`;
     $('periodGrid').innerHTML = d.periods.map((p) =>
-      `<button class="tbtn ${S.period === p.period ? 'on' : ''}" data-period="${p.period}">${p.period}교시${d.suggestedPeriod === p.period ? '<span class="now-tag">지금</span>' : ''}
-        <small>${esc(p.subject || '-')}${p.start ? ' · ' + esc(p.start) : ''}</small></button>`).join('');
+      `<button class="tbtn ${S.period === p.period ? 'on' : ''}" data-period="${p.period}" ${p.excluded ? 'disabled style="opacity:.35;cursor:not-allowed"' : ''}>${p.period}교시${d.suggestedPeriod === p.period ? '<span class="now-tag">지금</span>' : ''}
+        <small>${esc(p.subject || '-')}${p.excluded ? ' · 제외' : p.start ? ' · ' + esc(p.start) : ''}</small></button>`).join('');
     $('dayNote').classList.toggle('hidden', d.isSchoolDay);
     $('dayNote').textContent = d.isSchoolDay ? '' : '오늘은 캠페인 등교일이 아니라서 도장을 줄 수 없어요.';
   }
@@ -268,7 +269,7 @@
   $('unlockBtn').onclick = unlock;
   $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlock(); });
   $('teacherGrid').onclick = (e) => { const b = e.target.closest('[data-teacher]'); if (b) { S.teacher = b.dataset.teacher; renderStart(); } };
-  $('periodGrid').onclick = (e) => { const b = e.target.closest('[data-period]'); if (b) { S.period = Number(b.dataset.period); renderStart(); } };
+  $('periodGrid').onclick = (e) => { const b = e.target.closest('[data-period]'); if (b && !b.disabled) { S.period = Number(b.dataset.period); renderStart(); } };
   $('startBtn').onclick = startClass;
   $('studentGrid').onclick = (e) => { const b = e.target.closest('[data-no]'); if (b) pickStudent(b.dataset.no); };
   $('logList').onclick = (e) => { const b = e.target.closest('[data-undo]'); if (b) undo(b.dataset.undo); };

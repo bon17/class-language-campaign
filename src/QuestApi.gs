@@ -75,7 +75,7 @@ function questToday_() {
 /** 오늘 졸지 않기 체크 대상 교시 (시간표가 비어 있으면 1~교시 수) */
 function dozePeriods_(today) {
   const list = timetableFor_(today);
-  if (list.length) return list;
+  if (list.length) return list.filter((p) => !p.excluded); // 동아리 등 제외 과목은 체크하지 않음
   const n = getConfig().periodCount;
   return Array.from({ length: n }, (_, i) => ({ period: i + 1, subject: '', start: '' }));
 }

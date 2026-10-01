@@ -46,6 +46,7 @@ const CONFIG_DEFS = [
   { key: 'teachers', label: '교과 선생님 목록', type: 'list', def: '', desc: '(예비용) "교과선생님" 시트가 비어 있을 때만 사용. 이름(과목) 형식, 쉼표로 구분' },
   { key: 'adminCode', label: '담임 코드', type: 'code', def: '', desc: '담임 대시보드 입장 코드. 비우면 초기 세팅 때 자동 생성' },
   { key: 'accuseResultPublic', label: '지목 결과 공개', type: 'bool', def: false, desc: 'ON이면 검거 결과를 다른 투투에게 공개' },
+  { key: 'excludedSubjects', label: '캠페인 제외 과목', type: 'list', def: '동아리', desc: '쉼표로 구분. 졸지 않기 체크·교과 도장에서 빠짐 (시간표에는 회색으로 표시)' },
   { key: 'periodCount', label: '교시 수', type: 'int', def: 6, desc: '교과 선생님 화면의 교시 버튼 개수' },
   { key: 'reward1', label: '1위 보상', type: 'string', def: '특별 간식 + 자리 우선권 2회 + 청소 면제권 5장 + 보은페이 보너스 100원', desc: '' },
   { key: 'reward2', label: '2위 보상', type: 'string', def: '간식 + 자리 우선권 2회 + 청소 면제권 3장', desc: '' },
@@ -545,12 +546,12 @@ function timetableFor_(dateStr) {
   const tt = getTimetable_();
   const ov = tt.overrides[dateStr];
   const w = weekdayOf_(dateStr);
+  const excluded = getConfig().excludedSubjects || [];
   return tt.periods
-    .map((p) => ({
-      period: p.period,
-      start: p.start,
-      subject: ov ? ov.subjects[p.period] || '' : (tt.week[w] && tt.week[w][p.period]) || '',
-    }))
+    .map((p) => {
+      const subject = ov ? ov.subjects[p.period] || '' : (tt.week[w] && tt.week[w][p.period]) || '';
+      return { period: p.period, start: p.start, subject, excluded: excluded.indexOf(subject) >= 0 };
+    })
     .filter((p) => p.subject);
 }
 
@@ -561,7 +562,7 @@ function timetableMemo_(dateStr) {
 
 /**
  * 지금 시각이 속한 교시 (교과 선생님 화면 자동 선택용).
- * 교시 시작 10분 전부터 다음 교시 시작 10분 전까지를 그 교시로 본다. 수업이 없으면 null.
+ * 교시 시작 10분 전부터 다음 교시 시작 10분 전까지를 그 교시로 본다. 수업이 없거나 제외 과목이면 null.
  */
 function currentPeriod_(dateStr, hhmm) {
   const list = timetableFor_(dateStr);
@@ -575,7 +576,7 @@ function currentPeriod_(dateStr, hhmm) {
     const next = list[i + 1] && list[i + 1].start ? toMin(list[i + 1].start) - 10 : toMin(p.start) + CLASS_MINUTES + 10;
     if (now >= from && now < next) found = p;
   });
-  return found;
+  return found && !found.excluded ? found : null; // 제외 과목(동아리 등) 시간에는 자동 선택 안 함
 }
 
 // ===================== QuestApi.gs =====================
@@ -656,7 +657,7 @@ function questToday_() {
 /** 오늘 졸지 않기 체크 대상 교시 (시간표가 비어 있으면 1~교시 수) */
 function dozePeriods_(today) {
   const list = timetableFor_(today);
-  if (list.length) return list;
+  if (list.length) return list.filter((p) => !p.excluded); // 동아리 등 제외 과목은 체크하지 않음
   const n = getConfig().periodCount;
   return Array.from({ length: n }, (_, i) => ({ period: i + 1, subject: '', start: '' }));
 }
@@ -1008,7 +1009,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v5')) return;
+  if (!force && cache.get('schema_ok_v6')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -1040,7 +1041,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v5', '1', 21600);
+  cache.put('schema_ok_v6', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -1196,7 +1197,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v5']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v6']);
   invalidateStats_();
 }
 
@@ -1410,7 +1411,7 @@ function teacherInit(token) {
     teachers: cfg.teacherList,
     periods: Array.from({ length: maxPeriod }, (_, i) => {
       const p = tt.find((x) => x.period === i + 1);
-      return { period: i + 1, subject: p ? p.subject : '', start: p ? p.start : '' };
+      return { period: i + 1, subject: p ? p.subject : '', start: p ? p.start : '', excluded: !!(p && p.excluded) };
     }),
     suggestedPeriod: cur ? cur.period : null,
     now,
@@ -1427,6 +1428,7 @@ function checkTeacherInput_(teacherName, period) {
   if (!(p >= 1 && p <= 10)) throw new Error('교시를 다시 선택해 주세요.');
   const t = cfg.teacherList.find((x) => x.name === name);
   const ttp = timetableFor_(today).find((x) => x.period === p);
+  if (ttp && ttp.excluded) throw new Error(`${p}교시(${ttp.subject})는 캠페인에서 제외된 시간이에요.`);
   const subject = (t && t.subject) || (ttp && ttp.subject) || '';
   return { today, name, period: p, subject };
 }
@@ -2755,7 +2757,7 @@ const HTML_SOURCES = {
 
   function renderToday(d) {
     $('tt').innerHTML = d.timetable.length
-      ? d.timetable.map((p) => \`<div><small>\${p.period}교시\${p.start ? ' ' + esc(p.start) : ''}</small><b>\${esc(p.subject)}</b></div>\`).join('')
+      ? d.timetable.map((p) => \`<div\${p.excluded ? ' style="opacity:.45"' : ''}><small>\${p.period}교시\${p.excluded ? ' · 제외' : p.start ? ' ' + esc(p.start) : ''}</small><b>\${esc(p.subject)}</b></div>\`).join('')
       : '<p class="muted" style="margin:0">오늘은 수업이 없어요.</p>';
     $('ttMemo').textContent = d.timetableMemo ? '📌 ' + d.timetableMemo : '';
 
@@ -3205,7 +3207,8 @@ const HTML_SOURCES = {
     hideUndo();
     try { S.init = await call('teacherInit', S.token); } catch (e) { return toast(e.message, true); }
     const d = S.init;
-    S.period = d.suggestedPeriod || S.period || 1;
+    S.period = d.suggestedPeriod || S.period || (d.periods.find((p) => !p.excluded) || { period: 1 }).period;
+    if ((d.periods.find((p) => p.period === S.period) || {}).excluded) S.period = (d.periods.find((p) => !p.excluded) || { period: 1 }).period;
     if (!S.teacher) S.teacher = load('lastTeacher') || '';
     if (d.teachers.length && !d.teachers.some((t) => t.name === S.teacher)) S.teacher = '';
     renderStart();
@@ -3219,8 +3222,8 @@ const HTML_SOURCES = {
     $('teacherFree').classList.toggle('hidden', d.teachers.length > 0);
     $('nowText').textContent = \`지금 \${d.now}\${d.suggestedPeriod ? \` → \${d.suggestedPeriod}교시 자동 선택\` : ''}\`;
     $('periodGrid').innerHTML = d.periods.map((p) =>
-      \`<button class="tbtn \${S.period === p.period ? 'on' : ''}" data-period="\${p.period}">\${p.period}교시\${d.suggestedPeriod === p.period ? '<span class="now-tag">지금</span>' : ''}
-        <small>\${esc(p.subject || '-')}\${p.start ? ' · ' + esc(p.start) : ''}</small></button>\`).join('');
+      \`<button class="tbtn \${S.period === p.period ? 'on' : ''}" data-period="\${p.period}" \${p.excluded ? 'disabled style="opacity:.35;cursor:not-allowed"' : ''}>\${p.period}교시\${d.suggestedPeriod === p.period ? '<span class="now-tag">지금</span>' : ''}
+        <small>\${esc(p.subject || '-')}\${p.excluded ? ' · 제외' : p.start ? ' · ' + esc(p.start) : ''}</small></button>\`).join('');
     $('dayNote').classList.toggle('hidden', d.isSchoolDay);
     $('dayNote').textContent = d.isSchoolDay ? '' : '오늘은 캠페인 등교일이 아니라서 도장을 줄 수 없어요.';
   }
@@ -3308,7 +3311,7 @@ const HTML_SOURCES = {
   $('unlockBtn').onclick = unlock;
   $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') unlock(); });
   $('teacherGrid').onclick = (e) => { const b = e.target.closest('[data-teacher]'); if (b) { S.teacher = b.dataset.teacher; renderStart(); } };
-  $('periodGrid').onclick = (e) => { const b = e.target.closest('[data-period]'); if (b) { S.period = Number(b.dataset.period); renderStart(); } };
+  $('periodGrid').onclick = (e) => { const b = e.target.closest('[data-period]'); if (b && !b.disabled) { S.period = Number(b.dataset.period); renderStart(); } };
   $('startBtn').onclick = startClass;
   $('studentGrid').onclick = (e) => { const b = e.target.closest('[data-no]'); if (b) pickStudent(b.dataset.no); };
   $('logList').onclick = (e) => { const b = e.target.closest('[data-undo]'); if (b) undo(b.dataset.undo); };

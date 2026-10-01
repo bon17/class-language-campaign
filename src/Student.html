@@ -497,7 +497,7 @@
 
   function renderToday(d) {
     $('tt').innerHTML = d.timetable.length
-      ? d.timetable.map((p) => `<div><small>${p.period}교시${p.start ? ' ' + esc(p.start) : ''}</small><b>${esc(p.subject)}</b></div>`).join('')
+      ? d.timetable.map((p) => `<div${p.excluded ? ' style="opacity:.45"' : ''}><small>${p.period}교시${p.excluded ? ' · 제외' : p.start ? ' ' + esc(p.start) : ''}</small><b>${esc(p.subject)}</b></div>`).join('')
       : '<p class="muted" style="margin:0">오늘은 수업이 없어요.</p>';
     $('ttMemo').textContent = d.timetableMemo ? '📌 ' + d.timetableMemo : '';
 

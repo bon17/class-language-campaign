@@ -64,12 +64,12 @@ function timetableFor_(dateStr) {
   const tt = getTimetable_();
   const ov = tt.overrides[dateStr];
   const w = weekdayOf_(dateStr);
+  const excluded = getConfig().excludedSubjects || [];
   return tt.periods
-    .map((p) => ({
-      period: p.period,
-      start: p.start,
-      subject: ov ? ov.subjects[p.period] || '' : (tt.week[w] && tt.week[w][p.period]) || '',
-    }))
+    .map((p) => {
+      const subject = ov ? ov.subjects[p.period] || '' : (tt.week[w] && tt.week[w][p.period]) || '';
+      return { period: p.period, start: p.start, subject, excluded: excluded.indexOf(subject) >= 0 };
+    })
     .filter((p) => p.subject);
 }
 
@@ -80,7 +80,7 @@ function timetableMemo_(dateStr) {
 
 /**
  * 지금 시각이 속한 교시 (교과 선생님 화면 자동 선택용).
- * 교시 시작 10분 전부터 다음 교시 시작 10분 전까지를 그 교시로 본다. 수업이 없으면 null.
+ * 교시 시작 10분 전부터 다음 교시 시작 10분 전까지를 그 교시로 본다. 수업이 없거나 제외 과목이면 null.
  */
 function currentPeriod_(dateStr, hhmm) {
   const list = timetableFor_(dateStr);
@@ -94,5 +94,5 @@ function currentPeriod_(dateStr, hhmm) {
     const next = list[i + 1] && list[i + 1].start ? toMin(list[i + 1].start) - 10 : toMin(p.start) + CLASS_MINUTES + 10;
     if (now >= from && now < next) found = p;
   });
-  return found;
+  return found && !found.excluded ? found : null; // 제외 과목(동아리 등) 시간에는 자동 선택 안 함
 }

@@ -39,6 +39,7 @@ const CONFIG_DEFS = [
   { key: 'teachers', label: '교과 선생님 목록', type: 'list', def: '', desc: '(예비용) "교과선생님" 시트가 비어 있을 때만 사용. 이름(과목) 형식, 쉼표로 구분' },
   { key: 'adminCode', label: '담임 코드', type: 'code', def: '', desc: '담임 대시보드 입장 코드. 비우면 초기 세팅 때 자동 생성' },
   { key: 'accuseResultPublic', label: '지목 결과 공개', type: 'bool', def: false, desc: 'ON이면 검거 결과를 다른 투투에게 공개' },
+  { key: 'excludedSubjects', label: '캠페인 제외 과목', type: 'list', def: '동아리', desc: '쉼표로 구분. 졸지 않기 체크·교과 도장에서 빠짐 (시간표에는 회색으로 표시)' },
   { key: 'periodCount', label: '교시 수', type: 'int', def: 6, desc: '교과 선생님 화면의 교시 버튼 개수' },
   { key: 'reward1', label: '1위 보상', type: 'string', def: '특별 간식 + 자리 우선권 2회 + 청소 면제권 5장 + 보은페이 보너스 100원', desc: '' },
   { key: 'reward2', label: '2위 보상', type: 'string', def: '간식 + 자리 우선권 2회 + 청소 면제권 3장', desc: '' },

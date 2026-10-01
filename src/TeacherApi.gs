@@ -29,7 +29,7 @@ function teacherInit(token) {
     teachers: cfg.teacherList,
     periods: Array.from({ length: maxPeriod }, (_, i) => {
       const p = tt.find((x) => x.period === i + 1);
-      return { period: i + 1, subject: p ? p.subject : '', start: p ? p.start : '' };
+      return { period: i + 1, subject: p ? p.subject : '', start: p ? p.start : '', excluded: !!(p && p.excluded) };
     }),
     suggestedPeriod: cur ? cur.period : null,
     now,
@@ -46,6 +46,7 @@ function checkTeacherInput_(teacherName, period) {
   if (!(p >= 1 && p <= 10)) throw new Error('교시를 다시 선택해 주세요.');
   const t = cfg.teacherList.find((x) => x.name === name);
   const ttp = timetableFor_(today).find((x) => x.period === p);
+  if (ttp && ttp.excluded) throw new Error(`${p}교시(${ttp.subject})는 캠페인에서 제외된 시간이에요.`);
   const subject = (t && t.subject) || (ttp && ttp.subject) || '';
   return { today, name, period: p, subject };
 }
