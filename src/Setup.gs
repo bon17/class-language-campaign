@@ -5,7 +5,7 @@
 
 const SHEET_DEFS = [
   { name: SHEETS.CONFIG, headers: ['항목', '값', '설명'], textCols: [2], widths: [170, 420, 320] },
-  { name: SHEETS.STUDENTS, headers: STUDENT_HEADERS, textCols: [1, 3, 4], widths: [60, 100, 90, 70] },
+  { name: SHEETS.STUDENTS, headers: STUDENT_HEADERS, textCols: [1, 3], widths: [60, 100, 90] },
   { name: SHEETS.LEDGER, headers: LEDGER_HEADERS, textCols: [2, 3, 12] },
   { name: SHEETS.QUEST, headers: ['날짜', '학생번호', '칭찬완료', '인사완료', '졸지않기완료', '도장지급여부'], textCols: [1, 2] },
   { name: SHEETS.PRAISE, headers: ['타임스탬프', '날짜', '보낸번호', '받은번호', '내용', '숨김여부', '고마워여부'], textCols: [2, 3, 4] },
@@ -80,10 +80,10 @@ function setupSheets() {
   if (toAppend.length) cfgSheet.getRange(cfgSheet.getLastRow() + 1, 1, toAppend.length, 3).setValues(toAppend);
 
   if (studentsCreated) {
-    ss.getSheetByName(SHEETS.STUDENTS).getRange(2, 1, 3, 4).setValues([
-      ['1', '예시투투1', '', '1모둠'],
-      ['2', '예시투투2', '', '1모둠'],
-      ['3', '예시투투3', '', '2모둠'],
+    ss.getSheetByName(SHEETS.STUDENTS).getRange(2, 1, 3, 3).setValues([
+      ['1', '예시투투1', ''],
+      ['2', '예시투투2', ''],
+      ['3', '예시투투3', ''],
     ]);
   }
   const filled = fillMissingLoginCodes_();
@@ -94,7 +94,7 @@ function setupSheets() {
     '시트 초기 세팅 완료!\n\n' +
       `담임 코드: ${cfg.adminCode}\n교과 선생님 코드: ${cfg.teacherCode}\n` +
       `로그인 코드 새로 발급: ${filled}명\n\n` +
-      '학생 시트에 반 명단(번호·이름·모둠)을 붙여 넣은 뒤 [빈 로그인 코드 채우기]를 실행하세요.'
+      '학생 시트에 반 명단(번호·이름)을 붙여 넣은 뒤 [빈 로그인 코드 채우기]를 실행하세요.'
   );
 }
 

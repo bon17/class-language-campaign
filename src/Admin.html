@@ -237,12 +237,12 @@
     const list = d.students.slice().sort((a, b) =>
       S.sort === 'rank' ? a.rank - b.rank || Number(a.no) - Number(b.no) : Number(a.no) - Number(b.no));
     const medal = (r) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : r);
-    const head = `<tr><th>순위</th><th>번호</th><th class="left">이름</th><th>모둠</th>${d.missions.map((m) => `<th>${esc(MISSION_LABEL[m] || m)}</th>`).join('')}<th>차감</th><th>총점</th></tr>`;
+    const head = `<tr><th>순위</th><th>번호</th><th class="left">이름</th>${d.missions.map((m) => `<th>${esc(MISSION_LABEL[m] || m)}</th>`).join('')}<th>차감</th><th>총점</th></tr>`;
     const rows = list.map((s) => {
       const top = s.rank <= c.rankPublicCount;
       return `<tr${top ? ' style="background:#ffd23f14"' : ''}>
         <td><span class="medal">${medal(s.rank)}</span></td><td>${esc(s.no)}</td>
-        <td class="left">${esc(s.name)}</td><td>${esc(s.group)}</td>
+        <td class="left">${esc(s.name)}</td>
         ${d.missions.map((m) => `<td class="${scoreCls(s.byMission[m])}">${s.byMission[m] || '·'}</td>`).join('')}
         <td class="${s.minus ? 'minus' : 'muted'}">${s.minus || '·'}</td>
         <td class="yellow" style="font-weight:900;font-size:16px">${s.total}</td></tr>`;
@@ -254,10 +254,8 @@
     const d = S.data;
     const valid = new Set(d.students.map((s) => s.no));
     S.sel.forEach((no) => { if (!valid.has(no)) S.sel.delete(no); });
-    const groups = Array.from(new Set(d.students.map((s) => s.group).filter(Boolean)));
     $('groupChips').innerHTML =
-      `<button class="chip" data-group="__all">전체</button><button class="chip" data-group="__none">선택 해제</button>` +
-      groups.map((g) => `<button class="chip" data-group="${esc(g)}">${esc(g)}</button>`).join('');
+      `<button class="chip" data-group="__all">반 전체 선택</button><button class="chip" data-group="__none">선택 해제</button>`;
     $('studentChips').innerHTML = d.students.map((s) =>
       `<button class="chip ${S.sel.has(s.no) ? 'on' : ''}" data-no="${esc(s.no)}">${esc(s.no)}. ${esc(s.name)}</button>`).join('');
     $('selCount').textContent = `${S.sel.size}명 선택됨`;
@@ -386,7 +384,7 @@
     if (!b) return;
     const g = b.dataset.group;
     if (g === '__none') S.sel.clear();
-    else S.data.students.forEach((s) => { if (g === '__all' || s.group === g) S.sel.add(s.no); });
+    else S.data.students.forEach((s) => S.sel.add(s.no));
     renderManual();
   };
   $('scoreQuick').onclick = (e) => { const b = e.target.closest('[data-score]'); if (b) $('mScore').value = b.dataset.score; };

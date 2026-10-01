@@ -10,7 +10,7 @@ const LC = LEDGER_HEADERS.reduce((m, h, i) => ((m[h] = i), m), {});
 const MISSIONS = ['일퀘', '암행어사판정', '암행어사활동', '수업참여', 'MVP', '단체', '검거이전', '수동'];
 const INPUT_TYPES = ['학생', '암행어사', '교과', '담임', '시스템'];
 
-const STUDENT_HEADERS = ['번호', '이름', '로그인코드', '모둠'];
+const STUDENT_HEADERS = ['번호', '이름', '로그인코드'];
 
 // ---------- 잠금 ----------
 
@@ -43,7 +43,6 @@ function readStudents_() {
       no: String(r[0]).trim(),
       name: String(r[1]).trim(),
       code: String(r[2]).trim(),
-      group: String(r[3]).trim(),
     }))
     .filter((s) => s.no && s.name)
     .sort((a, b) => Number(a.no) - Number(b.no) || a.no.localeCompare(b.no));
@@ -158,7 +157,7 @@ function computeStats_(students, records, uptoDate) {
   const list = students.map((s) => {
     const byMission = {};
     MISSIONS.forEach((m) => (byMission[m] = 0));
-    return (map[s.no] = { no: s.no, name: s.name, group: s.group, total: 0, plus: 0, minus: 0, byMission, rank: 0 });
+    return (map[s.no] = { no: s.no, name: s.name, total: 0, plus: 0, minus: 0, byMission, rank: 0 });
   });
   records.forEach((r) => {
     if (r.cancelled) return;
