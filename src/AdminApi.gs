@@ -63,10 +63,7 @@ function adminSetRankLock(token, locked) {
 
 function buildAdminDashboard_() {
   const cfg = getConfig();
-  const students = readStudents_();
-  const records = readLedger_();
-  const stats = computeStats_(students, records);
-  CacheService.getScriptCache().put(CACHE_KEYS.STATS, JSON.stringify(stats), 300);
+  const { students, records, stats } = buildDataBundle_();
 
   const nameOf = {};
   students.forEach((s) => (nameOf[s.no] = s.name));

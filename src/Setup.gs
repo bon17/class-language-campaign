@@ -155,7 +155,8 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STATS]);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS]);
+  invalidateStats_();
 }
 
 /** 첫 자리가 0이 아닌 n자리 숫자 코드 (시트에서 앞자리 0이 사라지는 문제 방지) */

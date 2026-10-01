@@ -228,7 +228,6 @@
       [`${c.nickname} 수`, `${d.students.length}명`],
       ['기록장', `${d.ledgerTotal}줄`],
       ['랭킹', c.rankLocked ? '🔒 잠금' : '🔓 공개'],
-      ['중간 업데이트', c.midRankDate.slice(5)],
     ];
     $('cards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v" style="font-size:18px">${esc(v)}</div></div>`).join('');
     $('warnings').innerHTML = d.warnings.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('');
@@ -293,7 +292,6 @@
       ['학생 호칭', c.nickname],
       ['기간', `${c.startDate} ~ ${c.endDate}`],
       ['등교일', `${c.schoolDays.length}일 · ${c.schoolDays.map((x) => x.slice(5)).join(', ')}`],
-      ['중간 랭킹 업데이트일', c.midRankDate],
       ['랭킹 공개 인원', `상위 ${c.rankPublicCount}명`],
       ['뽑기 도장 기준', `${c.drawStampThreshold}개`],
       ['칭찬 최소 글자 수', `${c.praiseMinLength}자`],

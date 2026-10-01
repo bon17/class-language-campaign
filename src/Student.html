@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <?!= include('Styles') ?>
+  <style>
+    .wrap { max-width: 560px; }
+    .bubble-title {
+      font-family: 'Jua', 'Noto Sans KR', sans-serif; text-align: center; margin: 0; line-height: 1.1;
+      font-size: clamp(30px, 9vw, 42px); color: #c8f0ff; letter-spacing: 1px;
+      text-shadow: 3px 0 #1a4fa8, -3px 0 #1a4fa8, 0 3px #1a4fa8, 0 -3px #1a4fa8,
+        2px 2px #1a4fa8, -2px -2px #1a4fa8, 2px -2px #1a4fa8, -2px 2px #1a4fa8, 0 6px 0 #0b2a66, 0 0 18px #5cc8ff;
+    }
+    .space-sub { font-family: 'Jua', sans-serif; text-align: center; color: #fff; font-size: 14px; margin-bottom: 6px; opacity: .9; }
+
+    /* 우주 패널 */
+    .space {
+      position: relative; overflow: hidden; margin-top: 14px; padding: 18px 12px 16px; border-radius: 18px;
+      background:
+        radial-gradient(2px 2px at 8% 20%, #fff 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 85% 12%, #fff 50%, transparent 51%),
+        radial-gradient(1.5px 1.5px at 70% 78%, #fffa 50%, transparent 51%),
+        radial-gradient(2px 2px at 15% 88%, #fff 50%, transparent 51%),
+        radial-gradient(1px 1px at 50% 6%, #fff 50%, transparent 51%),
+        radial-gradient(ellipse at 50% 0%, #3b3f8f 0%, #1c1f55 45%, #0d1030 100%);
+      border: 1px solid #3b4aa0; box-shadow: 0 0 24px #2f8bff33;
+    }
+    .space .deco { position: absolute; font-size: 30px; pointer-events: none; filter: drop-shadow(0 0 6px #0008); }
+
+    /* 행성 도장판 */
+    .planet {
+      position: relative; width: min(84vw, 380px); aspect-ratio: 1; margin: 6px auto 0; border-radius: 50%;
+      background:
+        radial-gradient(ellipse 30% 18% at 28% 30%, var(--pland, #36c9e8) 60%, transparent 62%),
+        radial-gradient(ellipse 22% 30% at 72% 62%, var(--pland, #36c9e8) 60%, transparent 62%),
+        radial-gradient(ellipse 26% 14% at 40% 78%, var(--pland, #36c9e8) 60%, transparent 62%),
+        radial-gradient(circle at 32% 28%, var(--pbase, #3fa9ff, #1668d8 55%, #0b3f9e));
+      box-shadow: 0 0 34px #2f8bff99, inset -18px -22px 40px #0006;
+      display: flex; flex-direction: column; justify-content: center; gap: 2.2%;
+      font-size: clamp(14px, 4.6vw, 20px);
+    }
+    .prow { display: flex; justify-content: center; gap: 2.2%; }
+    .slot {
+      width: 12.6%; aspect-ratio: 1; border-radius: 50%; background: #fff; color: #2a63c9;
+      display: flex; align-items: center; justify-content: center; font-family: 'Jua', sans-serif;
+      box-shadow: 0 2px 0 #0003;
+    }
+    .slot.on {
+      background: radial-gradient(circle at 35% 35%, #fffbd0, #ffd23f 55%, #f5a300);
+      color: #8a4b00; font-size: 1.25em; box-shadow: 0 0 12px #ffd23f, 0 2px 0 #0003;
+    }
+    .slot.new { animation: pop .6s ease-out; }
+    @keyframes pop { 0% { transform: scale(0) rotate(-40deg); } 70% { transform: scale(1.25); } 100% { transform: scale(1); } }
+    .stamp-count { text-align: center; margin-top: 12px; font-family: 'Jua', sans-serif; font-size: 22px; }
+    .stamp-count b { color: var(--yellow); font-size: 30px; }
+    .bonus { text-align: center; color: var(--yellow); margin-top: 4px; letter-spacing: 2px; }
+    .planet-name { text-align: center; font-family: 'Jua', sans-serif; color: #cfe3ff; margin-top: 4px; }
+    .done-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 6px 0 2px; }
+    .done-planet { display: inline-flex; flex-direction: column; align-items: center; font-size: 26px; line-height: 1;
+      background: #ffffff12; border: 1px solid #ffffff22; border-radius: 12px; padding: 6px 8px; }
+    .done-planet small { font-size: 11px; color: var(--yellow); margin-top: 3px; font-family: 'Jua', sans-serif; }
+
+    /* 랭킹 */
+    .rank-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 10px; margin-top: 6px; background: #0a1a33; }
+    .rank-row.me { background: #ffd23f22; box-shadow: inset 0 0 0 1px var(--yellow); }
+    .rank-row .rk { width: 38px; text-align: center; font-weight: 900; font-size: 20px; }
+    .rank-row .nm { flex: 1; font-weight: 700; }
+    .rank-row .sc { color: var(--yellow); font-weight: 900; }
+    .myrank { margin-top: 12px; text-align: center; font-size: 18px; font-weight: 700; }
+    .myrank b { color: var(--yellow); font-size: 26px; }
+    .up { color: #ff6b8a; } .down { color: #5cc8ff; }
+
+    /* 카드 */
+    .mini { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .mini .card { text-align: center; }
+    .mini .card .v { font-size: 24px; }
+
+    /* 일퀘판 (종이 일퀘판 모양) */
+    .qtable { width: 100%; border-collapse: separate; border-spacing: 0 4px; font-size: 15px; }
+    .qtable th { background: #fff3c4; color: #1c1f55; position: static; padding: 8px 6px; font-family: 'Jua', sans-serif; font-size: 16px; }
+    .qtable th:first-child { border-radius: 8px 0 0 8px; } .qtable th:last-child { border-radius: 0 8px 8px 0; }
+    .qtable td { background: #e6e9f0; color: #1c1f55; padding: 8px 6px; }
+    .qtable td:first-child { border-radius: 8px 0 0 8px; font-family: 'Jua', sans-serif; white-space: nowrap; }
+    .qtable td:last-child { border-radius: 0 8px 8px 0; }
+    .qtable tr.today td { background: #cfeaff; box-shadow: inset 0 0 0 2px #5cc8ff; }
+    .mark { font-family: 'Jua', sans-serif; font-size: 22px; }
+    .mark.o { color: #1a9b4b; } .mark.x { color: #d64545; }
+
+    /* 수업 싸인판 */
+    .signs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+    .sign { aspect-ratio: 1 / 1.1; background: #fff; border-radius: 8px; color: #1c1f55; position: relative; padding: 4px 2px; font-size: 11px; overflow: hidden; word-break: keep-all; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .sign .n { position: absolute; top: 3px; left: 6px; font-family: 'Black Han Sans', sans-serif; font-size: 14px; }
+    .sign.on { background: linear-gradient(180deg, #fffbe0, #ffe58a); }
+    .sign.on .s { font-weight: 900; font-size: 13px; }
+    .sign.mvp { background: linear-gradient(180deg, #ffe0f0, #ffb3d9); }
+
+    .rec { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #ffffff12; font-size: 14px; }
+    .rec .d { color: var(--muted); width: 52px; flex: 0 0 auto; }
+    .rec .l { flex: 1; }
+    details summary { cursor: pointer; color: var(--sky); font-weight: 700; padding: 6px 0; }
+    .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .topbar .hi { flex: 1; font-weight: 700; }
+    .topbar .hi b { color: var(--yellow); }
+  </style>
+</head>
+<body>
+<div id="loading"></div>
+<div class="wrap">
+  <div class="metal hero">
+    <h1 class="title-font"><?!= titleHtml ?></h1>
+    <div class="deco"></div>
+    <div class="sub">- <?= subtitle ?> -</div>
+  </div>
+
+  <!-- 로그인 -->
+  <section id="login" class="box">
+    <h2 class="title-font">🚀 <?= nickname ?> 입장</h2>
+    <label for="no">번호</label>
+    <input id="no" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" placeholder="예: 7">
+    <label for="code">로그인 코드 (4자리)</label>
+    <input id="code" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" placeholder="선생님께 받은 코드">
+    <button class="btn yellow block" style="margin-top:14px" id="loginBtn">입장하기</button>
+    <p class="muted" style="margin-top:10px">한 번 입장하면 캠페인 기간 동안 로그인이 유지돼요.</p>
+  </section>
+
+  <!-- 내 화면 -->
+  <section id="app" class="hidden">
+    <div class="topbar">
+      <div class="hi" id="hi"></div>
+      <button class="btn sm ghost" id="refreshBtn">새로고침</button>
+      <button class="btn sm danger" id="logoutBtn">나가기</button>
+    </div>
+
+    <!-- 랭킹 -->
+    <div class="box" id="rankBox"></div>
+
+    <!-- 도장판 -->
+    <div class="space">
+      <span class="deco" style="left:10px;top:70px">🪐</span>
+      <span class="deco" style="right:12px;top:16px;font-size:22px">⭐</span>
+      <span class="deco" style="right:8px;bottom:40px;font-size:36px">🛸</span>
+      <div class="space-sub">- <?= subtitle ?> -</div>
+      <h2 class="bubble-title" id="boardTitle"></h2>
+      <div id="donePlanets"></div>
+      <div class="planet-name" id="planetName"></div>
+      <div class="planet" id="planet"></div>
+      <div class="stamp-count" id="stampCount"></div>
+      <div class="bonus" id="bonus"></div>
+    </div>
+
+    <!-- 요약 카드 -->
+    <div class="box">
+      <h2 class="title-font">📊 미션별 도장</h2>
+      <div class="mini" id="groups"></div>
+      <div class="neon-line"></div>
+      <div class="mini" id="extra"></div>
+      <div id="drawMsg" class="muted" style="text-align:center;margin-top:10px"></div>
+    </div>
+
+    <!-- 일퀘판 -->
+    <div class="space">
+      <div class="space-sub">일퀘 3가지를 모두 완료하면 도장 +1!</div>
+      <h2 class="bubble-title" id="questTitle"></h2>
+      <table class="qtable" style="margin-top:10px">
+        <thead><tr><th style="width:84px">날짜</th><th>일퀘 달성 여부</th><th>칭찬한 친구</th></tr></thead>
+        <tbody id="questBody"></tbody>
+      </table>
+    </div>
+
+    <!-- 수업 싸인판 -->
+    <div class="space">
+      <h2 class="bubble-title" id="signTitle"></h2>
+      <div class="space-sub" style="margin:6px 0 10px">수업 적극 참여 +2 · 수업 MVP +3</div>
+      <div class="signs" id="signs"></div>
+    </div>
+
+    <!-- 기록 -->
+    <div class="box">
+      <h2 class="title-font">📜 내 도장 기록</h2>
+      <div id="minusBox"></div>
+      <details id="allRec"><summary>전체 기록 보기</summary><div id="records"></div></details>
+    </div>
+
+    <p class="muted" style="text-align:center" id="stamp"></p>
+  </section>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  const S = { token: null, data: null, lastTotal: null, busy: false };
+  const $ = (id) => document.getElementById(id);
+  const WD = ['일', '월', '화', '수', '목', '금', '토'];
+  const PLANET_ROWS = [3, 5, 6, 5, 4]; // 종이 도장판과 같은 23칸
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+  function store(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+  function load(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function signed(n) { return n > 0 ? '+' + n : String(n); }
+  function md(d) { const [, m, dd] = d.split('-'); return `${Number(m)}/${Number(dd)}`; }
+  function wd(d) { const [y, m, dd] = d.split('-').map(Number); return WD[new Date(y, m - 1, dd).getDay()]; }
+
+  let toastTimer = null;
+  function toast(msg, isErr) {
+    const t = $('toast');
+    t.textContent = msg; t.className = isErr ? 'err' : ''; t.style.display = 'block';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (t.style.display = 'none'), 2600);
+  }
+
+  function call(fn, ...args) {
+    $('loading').style.display = 'block';
+    return new Promise((resolve, reject) => {
+      google.script.run
+        .withSuccessHandler((r) => { $('loading').style.display = 'none'; resolve(r); })
+        .withFailureHandler((err) => {
+          $('loading').style.display = 'none';
+          let msg = (err && err.message) || String(err);
+          if (msg.indexOf('AUTH:') >= 0) { logoutLocal(); msg = msg.replace(/^.*AUTH:\s*/, ''); }
+          reject(new Error(msg.replace(/^(Error|Exception):\s*/, '')));
+        })[fn](...args);
+    });
+  }
+
+  // ---------- 로그인 ----------
+  async function login() {
+    const no = $('no').value.trim(), code = $('code').value.trim();
+    if (!no || !code) return toast('번호와 코드를 입력해 주세요.', true);
+    $('loginBtn').disabled = true;
+    try {
+      const r = await call('studentLogin', no, code);
+      S.token = r.token;
+      store('tutuToken', r.token);
+      store('tutuNo', no);
+      $('code').value = '';
+      await refresh();
+    } catch (e) { toast(e.message, true); }
+    $('loginBtn').disabled = false;
+  }
+  function logoutLocal() {
+    S.token = null; S.data = null; S.lastTotal = null;
+    store('tutuToken', null);
+    $('app').classList.add('hidden');
+    $('login').classList.remove('hidden');
+  }
+  async function refresh(quiet) {
+    if (!S.token || S.busy) return;
+    S.busy = true;
+    try {
+      const d = await call('studentGetHome', S.token);
+      S.data = d;
+      $('login').classList.add('hidden');
+      $('app').classList.remove('hidden');
+      render();
+    } catch (e) { if (!quiet || !S.token) toast(e.message, true); }
+    S.busy = false;
+  }
+
+  // ---------- 렌더 ----------
+  function render() {
+    const d = S.data;
+    const nick = d.nickname;
+    $('hi').innerHTML = `🚀 <b>${esc(d.me.name)}</b> ${esc(nick)}, 안녕!` +
+      `<div class="muted">${md(d.today)}(${wd(d.today)}) · ${d.dayIndex ? `${d.dayIndex}/${d.dayCount}일차` : '등교일이 아니에요'}</div>`;
+    renderRanking(d);
+    renderBoard(d);
+    renderSummary(d);
+    renderQuest(d);
+    renderSigns(d);
+    renderRecords(d);
+    $('stamp').textContent = `마지막 갱신 ${d.serverTime} · 30초마다 자동 갱신`;
+  }
+
+  function renderRanking(d) {
+    const r = d.ranking;
+    if (r.locked) {
+      $('rankBox').innerHTML = `<h2 class="title-font">🏆 랭킹</h2>
+        <div style="text-align:center;padding:18px 0;font-size:20px;font-weight:700">🔒 랭킹 공개 전입니다</div>
+        <p class="muted" style="text-align:center;margin:0">도장을 열심히 모으면서 기다려 주세요!</p>`;
+      return;
+    }
+    const medal = (k) => (k === 1 ? '🥇' : k === 2 ? '🥈' : k === 3 ? '🥉' : k);
+    const rows = r.top.map((t) => `<div class="rank-row ${t.isMe ? 'me' : ''}">
+        <div class="rk">${medal(t.rank)}</div><div class="nm">${esc(t.name)}${t.isMe ? ' (나)' : ''}</div>
+        <div class="sc">${t.total}개</div></div>`).join('');
+    let delta = '';
+    if (r.myDelta > 0) delta = ` <span class="up">▲${r.myDelta}</span>`;
+    else if (r.myDelta < 0) delta = ` <span class="down">▼${-r.myDelta}</span>`;
+    else if (r.myDelta === 0) delta = ' <span class="muted">-</span>';
+    $('rankBox').innerHTML = `<h2 class="title-font">🏆 오늘의 랭킹 TOP ${r.publicCount}</h2>${rows || '<p class="muted">아직 기록이 없어요.</p>'}
+      <div class="myrank">내 순위: <b>${r.myRank}위</b>${delta}</div>
+      ${r.prevDate ? `<div class="muted" style="text-align:center">▲▼ ${md(r.prevDate)} 대비 · 내 순위는 나만 볼 수 있어요</div>` : '<div class="muted" style="text-align:center">내 순위는 나만 볼 수 있어요</div>'}`;
+  }
+
+  // 행성 하나 = 23칸 (종이 도장판). 다 채우면 다음 행성이 열리고 번호는 이어진다.
+  const PLANET_SIZE = PLANET_ROWS.reduce((a, b) => a + b, 0);
+  const PLANET_THEMES = [
+    { name: '푸른 행성', base: '#3fa9ff, #1668d8 55%, #0b3f9e', land: '#36c9e8', icon: '🌍' },
+    { name: '보라 행성', base: '#c08bff, #7a3fd8 55%, #46208f', land: '#e0a8ff', icon: '🔮' },
+    { name: '노을 행성', base: '#ffb36b, #e86a2c 55%, #9e3512', land: '#ffd38a', icon: '🪐' },
+    { name: '초록 행성', base: '#6be3a0, #1fa860 55%, #0d6b3a', land: '#b4f5c9', icon: '🌳' },
+    { name: '분홍 행성', base: '#ff9ccf, #e0479a 55%, #8f1f5c', land: '#ffd0e8', icon: '🌸' },
+    { name: '황금 행성', base: '#ffe680, #f0b400 55%, #9e6b00', land: '#fff3b0', icon: '👑' },
+  ];
+
+  function renderBoard(d) {
+    const total = d.total;
+    const filled = Math.max(0, total);
+    const prev = S.lastTotal == null ? filled : Math.max(0, S.lastTotal);
+    const cur = Math.floor(filled / PLANET_SIZE); // 지금 채우는 행성 번호 (0부터)
+    const theme = PLANET_THEMES[cur % PLANET_THEMES.length];
+    const start = cur * PLANET_SIZE;
+    $('boardTitle').textContent = `${d.me.name} 도장판`;
+
+    // 완성한 행성들
+    let done = '';
+    for (let i = 0; i < cur; i++) {
+      const t = PLANET_THEMES[i % PLANET_THEMES.length];
+      done += `<span class="done-planet" title="${esc(t.name)}">${t.icon}<small>${i * PLANET_SIZE + 1}~${(i + 1) * PLANET_SIZE}</small></span>`;
+    }
+    $('donePlanets').innerHTML = cur ? `<div class="muted" style="text-align:center;color:#cfe3ff">완성한 행성 ${cur}개</div><div class="done-row">${done}</div>` : '';
+    $('planetName').textContent = `${cur + 1}번째 · ${theme.name}`;
+
+    const planet = $('planet');
+    planet.style.setProperty('--pbase', theme.base);
+    planet.style.setProperty('--pland', theme.land);
+    let n = 0;
+    planet.innerHTML = PLANET_ROWS.map((cnt) => {
+      let row = '';
+      for (let i = 0; i < cnt; i++) {
+        n++;
+        const num = start + n;
+        const on = num <= filled;
+        const isNew = on && num > prev;
+        row += `<div class="slot ${on ? 'on' : ''} ${isNew ? 'new' : ''}">${on ? '★' : num}</div>`;
+      }
+      return `<div class="prow">${row}</div>`;
+    }).join('');
+    $('stampCount').innerHTML = `도장 <b>${total}</b>개`;
+    const left = (cur + 1) * PLANET_SIZE - filled;
+    $('bonus').textContent = `다음 행성까지 ${left}개!`;
+    if (S.lastTotal != null) {
+      if (Math.floor(Math.max(0, S.lastTotal) / PLANET_SIZE) < cur) toast(`🎉 ${cur}번째 행성 완성! 새 행성이 열렸어요!`);
+      else if (total > S.lastTotal) toast(`도장 ${signed(total - S.lastTotal)}! 🎉`);
+    }
+    S.lastTotal = total;
+  }
+
+  function renderSummary(d) {
+    $('groups').innerHTML = d.groups.map((g) =>
+      `<div class="card"><div class="k">${g.icon} ${esc(g.label)}</div><div class="v ${g.total < 0 ? 'minus' : ''}">${g.total}</div></div>`).join('');
+    const dr = d.draw;
+    $('extra').innerHTML =
+      `<div class="card"><div class="k">🔥 일퀘 연속</div><div class="v">${d.streak}일</div></div>` +
+      `<div class="card"><div class="k">🎟 쿠폰 뽑기권</div><div class="v">${dr.tickets}장</div></div>`;
+    const parts = [];
+    parts.push(dr.stampGoal ? `🎉 도장 ${dr.threshold}개 달성! 뽑기권 +1` : `도장 ${dr.threshold}개까지 <b class="yellow">${dr.toGoal}개</b> 남았어요!`);
+    parts.push(dr.allClear ? '🎉 일퀘 올클리어! 뽑기권 +1' : `일퀘를 ${d.dayCount}일 모두 완료하면 뽑기권 +1`);
+    $('drawMsg').innerHTML = parts.join('<br>');
+  }
+
+  function renderQuest(d) {
+    $('questTitle').textContent = `${d.me.name} 일퀘판`;
+    $('questBody').innerHTML = d.questBoard.map((q) => {
+      const mark = q.state === 'O' ? '<span class="mark o">O</span>'
+        : q.state === 'X' ? '<span class="mark x">X</span>'
+        : q.state === 'today' ? '<span style="font-weight:700">오늘 도전 중!</span>' : '';
+      return `<tr class="${q.state === 'today' ? 'today' : ''}"><td>${md(q.date)}(${wd(q.date)})</td>
+        <td style="text-align:center">${mark}</td><td style="text-align:center">${esc(q.friend)}</td></tr>`;
+    }).join('');
+  }
+
+  function renderSigns(d) {
+    $('signTitle').textContent = `${d.me.name} 싸인판`;
+    const list = d.classSigns;
+    const slots = Math.max(15, Math.ceil(list.length / 5) * 5);
+    let html = '';
+    for (let i = 0; i < slots; i++) {
+      const s = list[i];
+      if (!s) { html += `<div class="sign"><span class="n">${i + 1}</span></div>`; continue; }
+      html += `<div class="sign on ${s.mvp ? 'mvp' : ''}"><span class="n">${i + 1}</span>
+        <div class="s">${s.mvp ? '🏅MVP' : '+' + s.score}</div>
+        <div>${esc(s.subject || '수업')}</div><div>${md(s.date)}${s.period ? ' ' + esc(s.period) + '교시' : ''}</div></div>`;
+    }
+    $('signs').innerHTML = html;
+  }
+
+  function renderRecords(d) {
+    const line = (r) => `<div class="rec"><span class="d">${md(r.date)}</span><span class="l">${esc(r.label)}</span>
+      <span class="${r.score < 0 ? 'minus' : 'plus'}">${signed(r.score)}</span></div>`;
+    const minus = d.records.filter((r) => r.score < 0);
+    $('minusBox').innerHTML = minus.length
+      ? `<h3>차감 내역 (총 ${d.minusTotal})</h3>${minus.map(line).join('')}`
+      : '<p class="muted">차감된 도장이 없어요. 👍</p>';
+    $('records').innerHTML = d.records.length ? d.records.map(line).join('') : '<p class="muted">아직 기록이 없어요.</p>';
+  }
+
+  // ---------- 이벤트 ----------
+  $('loginBtn').onclick = login;
+  $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+  $('refreshBtn').onclick = () => refresh(false);
+  $('logoutBtn').onclick = logoutLocal;
+
+  setInterval(() => { if (S.token && document.visibilityState === 'visible') refresh(true); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.token) refresh(true); });
+
+  $('no').value = load('tutuNo') || '';
+  S.token = load('tutuToken');
+  if (S.token) refresh(false);
+</script>
+</body>
+</html>

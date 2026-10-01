@@ -48,6 +48,16 @@ function readStudents_() {
     .sort((a, b) => Number(a.no) - Number(b.no) || a.no.localeCompare(b.no));
 }
 
+/** readStudents_ 캐시판 (서버 내부 전용, 로그인 코드 포함) */
+function getStudentsCached_() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get(CACHE_KEYS.STUDENTS);
+  if (hit) return JSON.parse(hit);
+  const list = readStudents_();
+  cache.put(CACHE_KEYS.STUDENTS, JSON.stringify(list), 600);
+  return list;
+}
+
 // ---------- 기록장 읽기/쓰기 ----------
 
 function readLedger_() {
@@ -132,20 +142,93 @@ function cancelRecord_(id, reason, by) {
   });
 }
 
-// ---------- 합계·랭킹 ----------
+// ---------- 합계·랭킹 캐시 ----------
+// 기록이 바뀔 때마다 data_ver를 바꾸고, 캐시 키에 버전을 붙여 한 번에 무효화한다.
 
-function invalidateStats_() {
-  CacheService.getScriptCache().remove(CACHE_KEYS.STATS);
+const CACHE_TTL_SEC = 1800;
+
+function dataVersion_() {
+  const cache = CacheService.getScriptCache();
+  let v = cache.get('data_ver');
+  if (!v) {
+    v = String(Date.now());
+    cache.put('data_ver', v, 21600);
+  }
+  return v;
 }
 
-/** 캐시된 전체 통계 (로그인 코드·입력자 등 민감정보 없음) */
+function invalidateStats_() {
+  CacheService.getScriptCache().put('data_ver', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
+}
+
+/** 캐시된 전체 통계 (로그인 코드·입력자 등 민감정보 없음). prev = 직전 등교일 기준 순위 */
 function getStats_() {
-  const cache = CacheService.getScriptCache();
-  const hit = cache.get(CACHE_KEYS.STATS);
+  const key = `stats_${dataVersion_()}_${todayStr_()}`;
+  const hit = CacheService.getScriptCache().get(key);
+  return hit ? JSON.parse(hit) : buildDataBundle_().stats;
+}
+
+/** 투투 한 명의 기록 요약 (캐시) */
+function getStudentHistory_(no) {
+  const key = `hist_${dataVersion_()}_${todayStr_()}_${no}`;
+  const hit = CacheService.getScriptCache().get(key);
   if (hit) return JSON.parse(hit);
-  const stats = computeStats_(readStudents_(), readLedger_());
-  cache.put(CACHE_KEYS.STATS, JSON.stringify(stats), 300);
-  return stats;
+  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {} };
+}
+
+/**
+ * 시트를 한 번 읽어 통계·직전 등교일 순위·투투별 기록 요약을 만들고 캐시에 넣는다.
+ * 담임 대시보드처럼 원본이 필요한 곳은 반환값의 students/records를 그대로 쓴다.
+ */
+function buildDataBundle_() {
+  const cfg = getConfig();
+  const today = todayStr_();
+  const ver = dataVersion_();
+  const students = readStudents_();
+  const records = readLedger_();
+
+  const stats = computeStats_(students, records);
+  const prevDay = cfg.schoolDays.filter((d) => d < today).pop() || null;
+  stats.prev = null;
+  if (prevDay) {
+    const ranks = {};
+    computeStats_(students, records, prevDay).list.forEach((s) => (ranks[s.no] = s.rank));
+    stats.prev = { date: prevDay, ranks };
+  }
+
+  const nameOf = {};
+  students.forEach((s) => (nameOf[s.no] = s.name));
+  const hist = {};
+  students.forEach((s) => (hist[s.no] = { records: [], questDates: [], praiseTo: {} }));
+  records.forEach((r) => {
+    const h = hist[r.no];
+    if (!h || r.cancelled) return;
+    h.records.push({ date: r.date, mission: r.mission, score: r.score, period: r.period, subject: r.subject });
+    if (r.mission === '일퀘' && r.score > 0) h.questDates.push(r.date);
+  });
+  readPraiseSent_().forEach((p) => {
+    const h = hist[p.from];
+    if (h && !h.praiseTo[p.date]) h.praiseTo[p.date] = nameOf[p.to] || '';
+  });
+
+  const put = {};
+  put[`stats_${ver}_${today}`] = JSON.stringify(stats);
+  Object.keys(hist).forEach((no) => (put[`hist_${ver}_${today}_${no}`] = JSON.stringify(hist[no])));
+  try {
+    CacheService.getScriptCache().putAll(put, CACHE_TTL_SEC);
+  } catch (e) {
+    // 캐시 용량 초과 등은 무시 (다음 요청에서 다시 계산)
+  }
+  return { students, records, stats, hist };
+}
+
+/** 칭찬 시트에서 (날짜, 보낸번호, 받은번호)만 읽는다. 3단계 전에는 비어 있다. */
+function readPraiseSent_() {
+  const sh = ss_().getSheetByName(SHEETS.PRAISE);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 2, sh.getLastRow() - 1, 3).getValues()
+    .map((r) => ({ date: toDateStr_(r[0]), from: String(r[1]).trim(), to: String(r[2]).trim() }))
+    .filter((p) => p.date && p.from);
 }
 
 /**

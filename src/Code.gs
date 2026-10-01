@@ -1,16 +1,16 @@
 /**
  * 웹앱 진입점.
- *   (기본)          투투 화면        — 2단계에서 추가
+ *   (기본)          투투 화면
  *   ?page=teacher   교과 선생님 화면  — 4단계에서 추가
  *   ?page=admin     담임 대시보드
  */
 function doGet(e) {
   const page = (e && e.parameter && e.parameter.page) || '';
   const cfg = getConfig();
-  const files = { admin: 'Admin' };
-  const file = files[page];
+  const files = { '': 'Student', admin: 'Admin' };
+  const file = files[page] || 'ComingSoon';
 
-  const t = HtmlService.createTemplate(htmlSource_(file || 'ComingSoon'));
+  const t = HtmlService.createTemplate(htmlSource_(file));
   t.campaignName = cfg.campaignName;
   t.titleHtml = titleHtml_(cfg.campaignName);
   t.subtitle = cfg.subtitle;
