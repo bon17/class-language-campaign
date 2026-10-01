@@ -148,6 +148,14 @@
     .result.no { background: #20314f; color: var(--muted); }
     .news { background: #ffd23f1a; border: 1px solid #ffd23f55; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
 
+    .jump { position: sticky; top: 0; z-index: 30; display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      margin: 10px -14px 0; padding: 8px 14px; background: #03050aee; backdrop-filter: blur(6px); border-bottom: 1px solid #2a4a7c88; scrollbar-width: none; }
+    .jump::-webkit-scrollbar { display: none; }
+    .jump a { flex: 0 0 auto; cursor: pointer; padding: 6px 12px; border-radius: 999px; background: #0a1a33; border: 1px solid var(--navy-line);
+      color: var(--text); font-size: 14px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+    .jump a:active { background: var(--sky); color: #04203d; }
+    .box, .space { scroll-margin-top: 60px; }
+
     .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .topbar .hi { flex: 1; font-weight: 700; }
     .topbar .hi b { color: var(--yellow); }
@@ -180,6 +188,12 @@
       <button class="btn sm ghost" id="refreshBtn">새로고침</button>
       <button class="btn sm danger" id="logoutBtn">나가기</button>
     </div>
+
+    <!-- 바로가기 -->
+    <nav class="jump" id="jump">
+      <a data-to="rankBox">🏆 랭킹</a><a data-to="questBox">⭐ 퀘스트</a><a data-to="boardSec">🌍 도장판</a>
+      <a data-to="inboxSec">💌 칭찬함</a><a data-to="accuseBox">🔍 지목</a><a data-to="rewardSec">🎁 보상</a>
+    </nav>
 
     <!-- 랭킹 -->
     <div class="box" id="rankBox"></div>
@@ -233,7 +247,7 @@
     </div>
 
     <!-- 도장판 -->
-    <div class="space">
+    <div class="space" id="boardSec">
       <span class="deco" style="left:10px;top:70px">🪐</span>
       <span class="deco" style="right:12px;top:16px;font-size:22px">⭐</span>
       <span class="deco" style="right:8px;bottom:40px;font-size:36px">🛸</span>
@@ -273,7 +287,7 @@
     </div>
 
     <!-- 받은 칭찬함 -->
-    <div class="box">
+    <div class="box" id="inboxSec">
       <h2 class="title-font">💌 받은 칭찬함</h2>
       <div id="inbox"></div>
       <p class="muted" style="margin-bottom:0">받은 칭찬은 나만 볼 수 있어요.</p>
@@ -284,6 +298,12 @@
       <h2 class="bubble-title" id="signTitle"></h2>
       <div class="space-sub" style="margin:6px 0 10px">수업 적극 참여 +2 · 수업 MVP +3</div>
       <div class="signs" id="signs"></div>
+    </div>
+
+    <!-- 보상 안내 -->
+    <div class="box" id="rewardSec">
+      <h2 class="title-font">🏆 보상 안내</h2>
+      <div id="rewardGuide"></div>
     </div>
 
     <!-- 기록 -->
@@ -402,6 +422,7 @@
     renderRecords(d);
     renderInbox(d);
     renderSpy(d);
+    renderRewardGuide(d);
     $('stamp').textContent = `마지막 갱신 ${d.serverTime} · 30초마다 자동 갱신`;
   }
 
@@ -489,7 +510,8 @@
       `<div class="card"><div class="k">🎟 쿠폰 뽑기권</div><div class="v">${dr.tickets}장</div></div>`;
     const parts = [];
     parts.push(dr.stampGoal ? `🎉 도장 ${dr.threshold}개 달성! 뽑기권 +1` : `도장 ${dr.threshold}개까지 <b class="yellow">${dr.toGoal}개</b> 남았어요!`);
-    parts.push(dr.allClear ? '🎉 일퀘 올클리어! 뽑기권 +1' : `일퀘를 ${d.dayCount}일 모두 완료하면 뽑기권 +1`);
+    parts.push(dr.allClear ? '🎉 일퀘 올클리어! 뽑기권 +1' : `일퀘를 ${d.dayCount}일 모두 완료하면 뽑기권 +1 (지금 ${dr.questDays}/${d.dayCount}일)`);
+    if (dr.tickets || dr.done) parts.push(`🎟 쿠폰 뽑기: <b class="yellow">${dr.done}/${dr.tickets}</b>장 사용 · 담임 선생님께 뽑기를 받아요!`);
     $('drawMsg').innerHTML = parts.join('<br>');
   }
 
@@ -650,6 +672,12 @@
     if (ok) act('accuseSpy', no);
   }
 
+  function renderRewardGuide(d) {
+    const medal = ['🥇', '🥈', '🥉', '🏅', '🏅'];
+    $('rewardGuide').innerHTML = d.rewards.map((r, i) => r ? `<div class="rec"><span class="d" style="width:64px;color:var(--yellow);font-weight:900">${medal[i] || '🏅'} ${i + 1}위</span><span class="l">${esc(r)}</span></div>` : '').join('') +
+      `<div class="rec"><span class="d" style="width:64px;color:var(--sky);font-weight:900">🎟 뽑기</span><span class="l">일퀘 모두 클리어 또는 도장 ${d.draw.threshold}개 이상이면 랜덤 쿠폰 뽑기! (둘 다면 2번, 랭킹 보상과 중복 가능)</span></div>`;
+  }
+
   function renderInbox(d) {
     $('inbox').innerHTML = d.inbox.length
       ? d.inbox.map((p) => p.hidden ? `<div class="letter hid">🙈 담임 선생님이 숨긴 칭찬이에요 <span style="font-size:12px">(${md(p.date)})</span></div>` : `<div class="letter">
@@ -674,6 +702,7 @@
   $('loginBtn').onclick = login;
   $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
   $('refreshBtn').onclick = () => refresh(false);
+  $('jump').onclick = (e) => { const a = e.target.closest('[data-to]'); if (a) $(a.dataset.to).scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('friendChips').onclick = (e) => {
     const b = e.target.closest('[data-friend]');
     if (!b || b.disabled) return;

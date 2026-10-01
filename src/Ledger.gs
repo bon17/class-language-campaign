@@ -173,7 +173,7 @@ function getStudentHistory_(no) {
   const key = `hist_${dataVersion_()}_${todayStr_()}_${no}`;
   const hit = CacheService.getScriptCache().get(key);
   if (hit) return JSON.parse(hit);
-  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null };
+  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null, drawDone: 0 };
 }
 
 /**
@@ -199,7 +199,7 @@ function buildDataBundle_() {
 
   const nameOf = {};
   students.forEach((s) => (nameOf[s.no] = s.name));
-  const blank = () => ({ records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null });
+  const blank = () => ({ records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null, drawDone: 0 });
   const hist = {};
   students.forEach((s) => (hist[s.no] = blank()));
   records.forEach((r) => {
@@ -225,6 +225,8 @@ function buildDataBundle_() {
         : { id: p.id, date: p.date, fromName: nameOf[p.from] || '친구', text: p.text, thanked: p.thanked });
     }
   });
+  const drawDone = readDrawDone_();
+  Object.keys(drawDone).forEach((no) => { if (hist[no]) hist[no].drawDone = drawDone[no]; });
   readQuestRows_().forEach((q) => {
     if (q.date === today && hist[q.no]) hist[q.no].quest = { praiseDone: q.praiseDone, stamped: q.stamped, greet: q.greet, doze: q.doze };
   });

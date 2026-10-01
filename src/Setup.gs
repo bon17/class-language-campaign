@@ -14,7 +14,7 @@ function sheetDefs_() {
   { name: SHEETS.SPY, headers: SPY_HEADERS, textCols: [1, 2, 3, 4] },
   { name: SHEETS.SPY_JUDGE, headers: SPY_JUDGE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8] },
   { name: SHEETS.ACCUSE, headers: ACCUSE_HEADERS, textCols: [2, 3, 5] },
-  { name: SHEETS.DRAW, headers: ['학생번호', '일퀘올클여부', '도장12개여부', '뽑기횟수', '뽑기완료횟수'], textCols: [1] },
+  { name: SHEETS.DRAW, headers: DRAW_HEADERS, textCols: [1] },
   { name: SHEETS.TIMETABLE, headers: TIMETABLE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7], widths: [60, 80, 80, 80, 80, 80, 80] },
   { name: SHEETS.TT_OVERRIDE, headers: TT_OVERRIDE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
   { name: SHEETS.TEACHERS, headers: ['과목', '선생님 이름'], textCols: [1, 2], widths: [100, 140] },

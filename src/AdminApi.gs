@@ -142,6 +142,7 @@ function buildAdminDashboard_() {
 
   return {
     spy: spyAdminData_(students),
+    reward: rewardAdminData_(students, records, stats),
     praises,
     noPraise,
     questGrid,

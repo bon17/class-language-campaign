@@ -372,7 +372,7 @@ function getStudentHistory_(no) {
   const key = `hist_${dataVersion_()}_${todayStr_()}_${no}`;
   const hit = CacheService.getScriptCache().get(key);
   if (hit) return JSON.parse(hit);
-  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null };
+  return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null, drawDone: 0 };
 }
 
 /**
@@ -398,7 +398,7 @@ function buildDataBundle_() {
 
   const nameOf = {};
   students.forEach((s) => (nameOf[s.no] = s.name));
-  const blank = () => ({ records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null });
+  const blank = () => ({ records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null, drawDone: 0 });
   const hist = {};
   students.forEach((s) => (hist[s.no] = blank()));
   records.forEach((r) => {
@@ -424,6 +424,8 @@ function buildDataBundle_() {
         : { id: p.id, date: p.date, fromName: nameOf[p.from] || '친구', text: p.text, thanked: p.thanked });
     }
   });
+  const drawDone = readDrawDone_();
+  Object.keys(drawDone).forEach((no) => { if (hist[no]) hist[no].drawDone = drawDone[no]; });
   readQuestRows_().forEach((q) => {
     if (q.date === today && hist[q.no]) hist[q.no].quest = { praiseDone: q.praiseDone, stamped: q.stamped, greet: q.greet, doze: q.doze };
   });
@@ -1093,6 +1095,91 @@ function spyAdminData_(students) {
   };
 }
 
+// ===================== DrawApi.gs =====================
+/**
+ * 보상: 랭킹 보상 대상(1~5위, 공동 순위 포함) + 랜덤 쿠폰 뽑기 대상.
+ * - 일퀘 올클(등교일 전부 일퀘 도장) → 뽑기 1회
+ * - 순합계 도장이 "뽑기 도장 기준"(기본 12) 이상 → 뽑기 1회
+ * - 둘 다 → 2회. 뽑기 자체는 오프라인, 담임이 "뽑기 완료" 횟수를 체크한다.
+ * "뽑기" 시트는 담임이 체크할 때마다 전체 현황으로 다시 써 둔다 (뽑기완료횟수가 원본).
+ */
+
+const DRAW_HEADERS = ['학생번호', '일퀘올클여부', '도장12개여부', '뽑기횟수', '뽑기완료횟수'];
+
+/** 뽑기 시트의 완료 횟수 {번호: 횟수} */
+function readDrawDone_() {
+  const sh = ss_().getSheetByName(SHEETS.DRAW);
+  const out = {};
+  if (!sh || sh.getLastRow() < 2) return out;
+  sh.getRange(2, 1, sh.getLastRow() - 1, DRAW_HEADERS.length).getValues().forEach((r) => {
+    const no = String(r[0]).trim();
+    if (no) out[no] = Number(r[4]) || 0;
+  });
+  return out;
+}
+
+/** 투투별 뽑기 현황 */
+function drawStatus_(students, records, statsList) {
+  const cfg = getConfig();
+  const days = cfg.schoolDays;
+  const questDays = {};
+  records.forEach((r) => {
+    if (!r.cancelled && r.mission === '일퀘' && r.score > 0 && days.indexOf(r.date) >= 0) {
+      (questDays[r.no] = questDays[r.no] || new Set()).add(r.date);
+    }
+  });
+  const totalOf = {};
+  statsList.forEach((s) => (totalOf[s.no] = s.total));
+  const done = readDrawDone_();
+  return students.map((s) => {
+    const q = questDays[s.no] ? questDays[s.no].size : 0;
+    const allClear = days.length > 0 && q === days.length;
+    const stampGoal = (totalOf[s.no] || 0) >= cfg.drawStampThreshold;
+    const tickets = (allClear ? 1 : 0) + (stampGoal ? 1 : 0);
+    return { no: s.no, name: s.name, questDays: q, dayCount: days.length, allClear, total: totalOf[s.no] || 0, stampGoal, tickets, done: done[s.no] || 0 };
+  });
+}
+
+function writeDrawSheet_(list) {
+  const sh = sheet_(SHEETS.DRAW);
+  const last = sh.getLastRow();
+  if (last > 1) sh.getRange(2, 1, last - 1, DRAW_HEADERS.length).clearContent();
+  if (!list.length) return;
+  sh.getRange(2, 1, list.length, DRAW_HEADERS.length).setValues(
+    list.map((d) => [d.no, d.allClear ? 'O' : '', d.stampGoal ? 'O' : '', d.tickets, d.done])
+  );
+}
+
+/** 뽑기 완료 횟수 설정 (0 ~ 뽑기권 수) */
+function adminSetDrawDone(token, no, done) {
+  requireAdmin_(token);
+  withLock_(() => {
+    const { students, records, stats } = buildDataBundle_();
+    const list = drawStatus_(students, records, stats.list);
+    const d = list.find((x) => x.no === String(no));
+    if (!d) throw new Error('투투를 찾을 수 없어요.');
+    const n = Number(done);
+    if (!Number.isInteger(n) || n < 0) throw new Error('횟수를 확인해 주세요.');
+    if (n > Math.max(d.tickets, d.done)) throw new Error(`${d.name}의 뽑기권은 ${d.tickets}장이에요.`);
+    d.done = n;
+    writeDrawSheet_(list);
+    invalidateStats_();
+  });
+  return buildAdminDashboard_();
+}
+
+/** 담임 대시보드용: 랭킹 보상 대상 + 뽑기 대상 */
+function rewardAdminData_(students, records, stats) {
+  const cfg = getConfig();
+  const ranked = stats.list.slice().sort((a, b) => a.rank - b.rank || Number(a.no) - Number(b.no));
+  const rankRewards = [];
+  for (let r = 1; r <= cfg.rewards.length; r++) {
+    const who = ranked.filter((s) => s.rank === r && s.total > 0).map((s) => ({ no: s.no, name: s.name, total: s.total }));
+    rankRewards.push({ rank: r, reward: cfg.rewards[r - 1] || '', who });
+  }
+  return { rankRewards, draws: drawStatus_(students, records, stats.list), threshold: cfg.drawStampThreshold };
+}
+
 // ===================== Auth.gs =====================
 /**
  * 코드 로그인 → 서버가 발급한 토큰으로 이후 요청을 검증한다.
@@ -1260,7 +1347,7 @@ function sheetDefs_() {
   { name: SHEETS.SPY, headers: SPY_HEADERS, textCols: [1, 2, 3, 4] },
   { name: SHEETS.SPY_JUDGE, headers: SPY_JUDGE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8] },
   { name: SHEETS.ACCUSE, headers: ACCUSE_HEADERS, textCols: [2, 3, 5] },
-  { name: SHEETS.DRAW, headers: ['학생번호', '일퀘올클여부', '도장12개여부', '뽑기횟수', '뽑기완료횟수'], textCols: [1] },
+  { name: SHEETS.DRAW, headers: DRAW_HEADERS, textCols: [1] },
   { name: SHEETS.TIMETABLE, headers: TIMETABLE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7], widths: [60, 80, 80, 80, 80, 80, 80] },
   { name: SHEETS.TT_OVERRIDE, headers: TT_OVERRIDE_HEADERS, textCols: [1, 2, 3, 4, 5, 6, 7, 8, 9] },
   { name: SHEETS.TEACHERS, headers: ['과목', '선생님 이름'], textCols: [1, 2], widths: [100, 140] },
@@ -1628,7 +1715,11 @@ function buildStudentHome_(me) {
       stampGoal,
       allClear,
       tickets: (stampGoal ? 1 : 0) + (allClear ? 1 : 0),
+      done: hist.drawDone || 0,
+      questDays: questSet.size,
     },
+    rewards: cfg.rewards,
+    rankPublicCount: cfg.rankPublicCount,
     classSigns: hist.records
       .filter((r) => r.mission === '수업참여' || r.mission === 'MVP')
       .map((r) => ({ date: r.date, period: r.period, subject: r.subject, mvp: r.mission === 'MVP', score: r.score })),
@@ -1937,6 +2028,7 @@ function buildAdminDashboard_() {
 
   return {
     spy: spyAdminData_(students),
+    reward: rewardAdminData_(students, records, stats),
     praises,
     noPraise,
     questGrid,
@@ -2045,6 +2137,7 @@ const HTML_SOURCES = {
       <button class="tab" data-tab="quest">✅ 일퀘</button>
       <button class="tab" data-tab="praise">💌 칭찬</button>
       <button class="tab" data-tab="spy">🕵️ 암행어사</button>
+      <button class="tab" data-tab="reward">🎁 보상</button>
       <button class="tab" data-tab="manual">✍️ 도장 입력</button>
       <button class="tab" data-tab="ledger">📜 기록장</button>
       <button class="tab" data-tab="settings">⚙️ 설정</button>
@@ -2107,6 +2200,17 @@ const HTML_SOURCES = {
       <div class="table-wrap"><table id="spyJudges"></table></div>
       <h3>지목 기록 <span class="muted" id="accCount" style="font-size:13px"></span></h3>
       <div class="table-wrap"><table id="spyAcc"></table></div>
+    </div>
+
+    <!-- 보상 -->
+    <div id="tab-reward" class="box hidden" style="margin-top:0">
+      <h2 class="title-font">🏆 랭킹 보상 대상 <span class="muted" style="font-size:13px">(현재 기준 · 공동 순위 포함 · 오프라인 지급)</span></h2>
+      <div id="rankRewards"></div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">🎟 쿠폰 뽑기 대상</h2>
+      <p class="muted" id="drawRule"></p>
+      <label style="display:flex;gap:6px;align-items:center;margin:0 0 8px"><input id="drawOnly" type="checkbox" checked style="width:22px;min-height:22px"> 뽑기권 있는 투투만 보기</label>
+      <div class="table-wrap"><table id="drawTable"></table></div>
     </div>
 
     <!-- 수동 도장 -->
@@ -2284,7 +2388,7 @@ const HTML_SOURCES = {
     const d = S.data;
     if (!d) return;
     $('stamp').textContent = \`마지막 계산: \${d.computedAt}\`;
-    renderOverview(); renderQuest(); renderPraise(); renderSpy(); renderManual(); renderLedger(); renderSettings();
+    renderOverview(); renderQuest(); renderPraise(); renderSpy(); renderReward(); renderManual(); renderLedger(); renderSettings();
   }
 
   function renderOverview() {
@@ -2404,6 +2508,30 @@ const HTML_SOURCES = {
     try { setData(await call('adminDismissSpy', S.token, row)); toast('해임했어요.'); } catch (e) { toast(e.message, true); }
   }
 
+  function renderReward() {
+    const d = S.data, rw = d.reward;
+    const medal = (r) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : '🏅');
+    $('rankRewards').innerHTML = rw.rankRewards.map((r) => \`<div class="card" style="margin-top:8px">
+        <div class="row"><b class="yellow" style="flex:0 0 auto;font-size:18px">\${medal(r.rank)} \${r.rank}위</b>
+          <span class="grow">\${r.who.length ? r.who.map((w) => \`<b>\${esc(w.no)}. \${esc(w.name)}</b> <span class="muted">(\${w.total}개)</span>\`).join(', ') : \`<span class="muted">해당 없음\${r.rank > 1 && rw.rankRewards.slice(0, r.rank - 1).some((x) => x.who.length > 1) ? ' (윗 순위에 공동 순위가 있어요)' : ''}</span>\`}</span></div>
+        <div class="muted" style="margin-top:4px">\${esc(r.reward)}</div></div>\`).join('');
+    $('drawRule').textContent = \`일퀘 올클(등교일 \${d.cfg.schoolDays.length}일 모두 완료) → 1장 · 순합계 도장 \${rw.threshold}개 이상 → 1장 · 둘 다 → 2장 (랭킹 보상과 중복 가능)\`;
+    const list = rw.draws.filter((x) => !$('drawOnly').checked || x.tickets > 0 || x.done > 0);
+    $('drawTable').innerHTML = \`<tr><th class="left">투투</th><th>일퀘</th><th>올클</th><th>도장</th><th>\${rw.threshold}↑</th><th>뽑기권</th><th>뽑기 완료</th></tr>\` +
+      (list.map((x) => \`<tr><td class="left">\${esc(x.no)}. \${esc(x.name)}</td>
+        <td>\${x.questDays}/\${x.dayCount}</td><td class="\${x.allClear ? 'plus' : 'muted'}">\${x.allClear ? '✓' : '·'}</td>
+        <td>\${x.total}</td><td class="\${x.stampGoal ? 'plus' : 'muted'}">\${x.stampGoal ? '✓' : '·'}</td>
+        <td class="yellow" style="font-weight:900">\${x.tickets}</td>
+        <td><button class="btn sm ghost" data-draw="\${esc(x.no)}" data-n="\${x.done - 1}" \${x.done <= 0 ? 'disabled' : ''}>−</button>
+          <b style="display:inline-block;min-width:44px" class="\${x.tickets && x.done >= x.tickets ? 'plus' : ''}">\${x.done}/\${x.tickets}</b>
+          <button class="btn sm" data-draw="\${esc(x.no)}" data-n="\${x.done + 1}" \${x.done >= x.tickets ? 'disabled' : ''}>뽑기 완료 +1</button></td></tr>\`).join('') ||
+        '<tr><td colspan="7" class="muted">아직 뽑기 대상자가 없어요.</td></tr>');
+  }
+
+  async function setDrawDone(no, n) {
+    try { setData(await call('adminSetDrawDone', S.token, no, n)); toast('저장했어요.'); } catch (e) { toast(e.message, true); }
+  }
+
   function renderManual() {
     const d = S.data;
     const valid = new Set(d.students.map((s) => s.no));
@@ -2464,7 +2592,7 @@ const HTML_SOURCES = {
   function switchTab(tab) {
     S.tab = tab;
     document.querySelectorAll('#tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-    ['overview', 'quest', 'praise', 'spy', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
+    ['overview', 'quest', 'praise', 'spy', 'reward', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
   }
 
   async function submitManual() {
@@ -2536,6 +2664,8 @@ const HTML_SOURCES = {
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
   $('spyBtn').onclick = appointSpy;
+  $('drawOnly').addEventListener('change', renderReward);
+  $('drawTable').onclick = (e) => { const b = e.target.closest('[data-draw]'); if (b && !b.disabled) setDrawDone(b.dataset.draw, Number(b.dataset.n)); };
   $('spyHist').onclick = (e) => { const b = e.target.closest('[data-dismiss]'); if (b) dismissSpy(Number(b.dataset.dismiss)); };
   $('spyWeeks').onclick = (e) => {
     const a = e.target.closest('[data-week]'); if (!a) return; e.preventDefault();
@@ -2748,6 +2878,14 @@ const HTML_SOURCES = {
     .result.no { background: #20314f; color: var(--muted); }
     .news { background: #ffd23f1a; border: 1px solid #ffd23f55; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
 
+    .jump { position: sticky; top: 0; z-index: 30; display: flex; gap: 6px; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      margin: 10px -14px 0; padding: 8px 14px; background: #03050aee; backdrop-filter: blur(6px); border-bottom: 1px solid #2a4a7c88; scrollbar-width: none; }
+    .jump::-webkit-scrollbar { display: none; }
+    .jump a { flex: 0 0 auto; cursor: pointer; padding: 6px 12px; border-radius: 999px; background: #0a1a33; border: 1px solid var(--navy-line);
+      color: var(--text); font-size: 14px; font-weight: 700; text-decoration: none; white-space: nowrap; }
+    .jump a:active { background: var(--sky); color: #04203d; }
+    .box, .space { scroll-margin-top: 60px; }
+
     .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .topbar .hi { flex: 1; font-weight: 700; }
     .topbar .hi b { color: var(--yellow); }
@@ -2780,6 +2918,12 @@ const HTML_SOURCES = {
       <button class="btn sm ghost" id="refreshBtn">새로고침</button>
       <button class="btn sm danger" id="logoutBtn">나가기</button>
     </div>
+
+    <!-- 바로가기 -->
+    <nav class="jump" id="jump">
+      <a data-to="rankBox">🏆 랭킹</a><a data-to="questBox">⭐ 퀘스트</a><a data-to="boardSec">🌍 도장판</a>
+      <a data-to="inboxSec">💌 칭찬함</a><a data-to="accuseBox">🔍 지목</a><a data-to="rewardSec">🎁 보상</a>
+    </nav>
 
     <!-- 랭킹 -->
     <div class="box" id="rankBox"></div>
@@ -2833,7 +2977,7 @@ const HTML_SOURCES = {
     </div>
 
     <!-- 도장판 -->
-    <div class="space">
+    <div class="space" id="boardSec">
       <span class="deco" style="left:10px;top:70px">🪐</span>
       <span class="deco" style="right:12px;top:16px;font-size:22px">⭐</span>
       <span class="deco" style="right:8px;bottom:40px;font-size:36px">🛸</span>
@@ -2873,7 +3017,7 @@ const HTML_SOURCES = {
     </div>
 
     <!-- 받은 칭찬함 -->
-    <div class="box">
+    <div class="box" id="inboxSec">
       <h2 class="title-font">💌 받은 칭찬함</h2>
       <div id="inbox"></div>
       <p class="muted" style="margin-bottom:0">받은 칭찬은 나만 볼 수 있어요.</p>
@@ -2884,6 +3028,12 @@ const HTML_SOURCES = {
       <h2 class="bubble-title" id="signTitle"></h2>
       <div class="space-sub" style="margin:6px 0 10px">수업 적극 참여 +2 · 수업 MVP +3</div>
       <div class="signs" id="signs"></div>
+    </div>
+
+    <!-- 보상 안내 -->
+    <div class="box" id="rewardSec">
+      <h2 class="title-font">🏆 보상 안내</h2>
+      <div id="rewardGuide"></div>
     </div>
 
     <!-- 기록 -->
@@ -3002,6 +3152,7 @@ const HTML_SOURCES = {
     renderRecords(d);
     renderInbox(d);
     renderSpy(d);
+    renderRewardGuide(d);
     $('stamp').textContent = \`마지막 갱신 \${d.serverTime} · 30초마다 자동 갱신\`;
   }
 
@@ -3089,7 +3240,8 @@ const HTML_SOURCES = {
       \`<div class="card"><div class="k">🎟 쿠폰 뽑기권</div><div class="v">\${dr.tickets}장</div></div>\`;
     const parts = [];
     parts.push(dr.stampGoal ? \`🎉 도장 \${dr.threshold}개 달성! 뽑기권 +1\` : \`도장 \${dr.threshold}개까지 <b class="yellow">\${dr.toGoal}개</b> 남았어요!\`);
-    parts.push(dr.allClear ? '🎉 일퀘 올클리어! 뽑기권 +1' : \`일퀘를 \${d.dayCount}일 모두 완료하면 뽑기권 +1\`);
+    parts.push(dr.allClear ? '🎉 일퀘 올클리어! 뽑기권 +1' : \`일퀘를 \${d.dayCount}일 모두 완료하면 뽑기권 +1 (지금 \${dr.questDays}/\${d.dayCount}일)\`);
+    if (dr.tickets || dr.done) parts.push(\`🎟 쿠폰 뽑기: <b class="yellow">\${dr.done}/\${dr.tickets}</b>장 사용 · 담임 선생님께 뽑기를 받아요!\`);
     $('drawMsg').innerHTML = parts.join('<br>');
   }
 
@@ -3250,6 +3402,12 @@ const HTML_SOURCES = {
     if (ok) act('accuseSpy', no);
   }
 
+  function renderRewardGuide(d) {
+    const medal = ['🥇', '🥈', '🥉', '🏅', '🏅'];
+    $('rewardGuide').innerHTML = d.rewards.map((r, i) => r ? \`<div class="rec"><span class="d" style="width:64px;color:var(--yellow);font-weight:900">\${medal[i] || '🏅'} \${i + 1}위</span><span class="l">\${esc(r)}</span></div>\` : '').join('') +
+      \`<div class="rec"><span class="d" style="width:64px;color:var(--sky);font-weight:900">🎟 뽑기</span><span class="l">일퀘 모두 클리어 또는 도장 \${d.draw.threshold}개 이상이면 랜덤 쿠폰 뽑기! (둘 다면 2번, 랭킹 보상과 중복 가능)</span></div>\`;
+  }
+
   function renderInbox(d) {
     $('inbox').innerHTML = d.inbox.length
       ? d.inbox.map((p) => p.hidden ? \`<div class="letter hid">🙈 담임 선생님이 숨긴 칭찬이에요 <span style="font-size:12px">(\${md(p.date)})</span></div>\` : \`<div class="letter">
@@ -3274,6 +3432,7 @@ const HTML_SOURCES = {
   $('loginBtn').onclick = login;
   $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
   $('refreshBtn').onclick = () => refresh(false);
+  $('jump').onclick = (e) => { const a = e.target.closest('[data-to]'); if (a) $(a.dataset.to).scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('friendChips').onclick = (e) => {
     const b = e.target.closest('[data-friend]');
     if (!b || b.disabled) return;

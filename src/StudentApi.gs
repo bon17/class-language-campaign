@@ -135,7 +135,11 @@ function buildStudentHome_(me) {
       stampGoal,
       allClear,
       tickets: (stampGoal ? 1 : 0) + (allClear ? 1 : 0),
+      done: hist.drawDone || 0,
+      questDays: questSet.size,
     },
+    rewards: cfg.rewards,
+    rankPublicCount: cfg.rankPublicCount,
     classSigns: hist.records
       .filter((r) => r.mission === '수업참여' || r.mission === 'MVP')
       .map((r) => ({ date: r.date, period: r.period, subject: r.subject, mvp: r.mission === 'MVP', score: r.score })),

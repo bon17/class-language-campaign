@@ -11,7 +11,7 @@ const src = path.join(root, 'src');
 const out = path.join(root, 'dist', 'Code.gs');
 
 // 의존 순서가 필요하지는 않지만 읽기 쉽게 고정 순서로 묶는다
-const GS_ORDER = ['Config', 'Ledger', 'Timetable', 'QuestApi', 'SpyApi', 'Auth', 'Setup', 'StudentApi', 'TeacherApi', 'AdminApi', 'Code'];
+const GS_ORDER = ['Config', 'Ledger', 'Timetable', 'QuestApi', 'SpyApi', 'DrawApi', 'Auth', 'Setup', 'StudentApi', 'TeacherApi', 'AdminApi', 'Code'];
 const gsFiles = fs.readdirSync(src).filter((f) => f.endsWith('.gs')).map((f) => f.slice(0, -3));
 const ordered = GS_ORDER.filter((n) => gsFiles.includes(n)).concat(gsFiles.filter((n) => !GS_ORDER.includes(n)).sort());
 const htmlFiles = fs.readdirSync(src).filter((f) => f.endsWith('.html')).sort();

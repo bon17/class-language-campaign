@@ -36,6 +36,7 @@
       <button class="tab" data-tab="quest">✅ 일퀘</button>
       <button class="tab" data-tab="praise">💌 칭찬</button>
       <button class="tab" data-tab="spy">🕵️ 암행어사</button>
+      <button class="tab" data-tab="reward">🎁 보상</button>
       <button class="tab" data-tab="manual">✍️ 도장 입력</button>
       <button class="tab" data-tab="ledger">📜 기록장</button>
       <button class="tab" data-tab="settings">⚙️ 설정</button>
@@ -98,6 +99,17 @@
       <div class="table-wrap"><table id="spyJudges"></table></div>
       <h3>지목 기록 <span class="muted" id="accCount" style="font-size:13px"></span></h3>
       <div class="table-wrap"><table id="spyAcc"></table></div>
+    </div>
+
+    <!-- 보상 -->
+    <div id="tab-reward" class="box hidden" style="margin-top:0">
+      <h2 class="title-font">🏆 랭킹 보상 대상 <span class="muted" style="font-size:13px">(현재 기준 · 공동 순위 포함 · 오프라인 지급)</span></h2>
+      <div id="rankRewards"></div>
+      <div class="neon-line"></div>
+      <h2 class="title-font">🎟 쿠폰 뽑기 대상</h2>
+      <p class="muted" id="drawRule"></p>
+      <label style="display:flex;gap:6px;align-items:center;margin:0 0 8px"><input id="drawOnly" type="checkbox" checked style="width:22px;min-height:22px"> 뽑기권 있는 투투만 보기</label>
+      <div class="table-wrap"><table id="drawTable"></table></div>
     </div>
 
     <!-- 수동 도장 -->
@@ -275,7 +287,7 @@
     const d = S.data;
     if (!d) return;
     $('stamp').textContent = `마지막 계산: ${d.computedAt}`;
-    renderOverview(); renderQuest(); renderPraise(); renderSpy(); renderManual(); renderLedger(); renderSettings();
+    renderOverview(); renderQuest(); renderPraise(); renderSpy(); renderReward(); renderManual(); renderLedger(); renderSettings();
   }
 
   function renderOverview() {
@@ -395,6 +407,30 @@
     try { setData(await call('adminDismissSpy', S.token, row)); toast('해임했어요.'); } catch (e) { toast(e.message, true); }
   }
 
+  function renderReward() {
+    const d = S.data, rw = d.reward;
+    const medal = (r) => (r === 1 ? '🥇' : r === 2 ? '🥈' : r === 3 ? '🥉' : '🏅');
+    $('rankRewards').innerHTML = rw.rankRewards.map((r) => `<div class="card" style="margin-top:8px">
+        <div class="row"><b class="yellow" style="flex:0 0 auto;font-size:18px">${medal(r.rank)} ${r.rank}위</b>
+          <span class="grow">${r.who.length ? r.who.map((w) => `<b>${esc(w.no)}. ${esc(w.name)}</b> <span class="muted">(${w.total}개)</span>`).join(', ') : `<span class="muted">해당 없음${r.rank > 1 && rw.rankRewards.slice(0, r.rank - 1).some((x) => x.who.length > 1) ? ' (윗 순위에 공동 순위가 있어요)' : ''}</span>`}</span></div>
+        <div class="muted" style="margin-top:4px">${esc(r.reward)}</div></div>`).join('');
+    $('drawRule').textContent = `일퀘 올클(등교일 ${d.cfg.schoolDays.length}일 모두 완료) → 1장 · 순합계 도장 ${rw.threshold}개 이상 → 1장 · 둘 다 → 2장 (랭킹 보상과 중복 가능)`;
+    const list = rw.draws.filter((x) => !$('drawOnly').checked || x.tickets > 0 || x.done > 0);
+    $('drawTable').innerHTML = `<tr><th class="left">투투</th><th>일퀘</th><th>올클</th><th>도장</th><th>${rw.threshold}↑</th><th>뽑기권</th><th>뽑기 완료</th></tr>` +
+      (list.map((x) => `<tr><td class="left">${esc(x.no)}. ${esc(x.name)}</td>
+        <td>${x.questDays}/${x.dayCount}</td><td class="${x.allClear ? 'plus' : 'muted'}">${x.allClear ? '✓' : '·'}</td>
+        <td>${x.total}</td><td class="${x.stampGoal ? 'plus' : 'muted'}">${x.stampGoal ? '✓' : '·'}</td>
+        <td class="yellow" style="font-weight:900">${x.tickets}</td>
+        <td><button class="btn sm ghost" data-draw="${esc(x.no)}" data-n="${x.done - 1}" ${x.done <= 0 ? 'disabled' : ''}>−</button>
+          <b style="display:inline-block;min-width:44px" class="${x.tickets && x.done >= x.tickets ? 'plus' : ''}">${x.done}/${x.tickets}</b>
+          <button class="btn sm" data-draw="${esc(x.no)}" data-n="${x.done + 1}" ${x.done >= x.tickets ? 'disabled' : ''}>뽑기 완료 +1</button></td></tr>`).join('') ||
+        '<tr><td colspan="7" class="muted">아직 뽑기 대상자가 없어요.</td></tr>');
+  }
+
+  async function setDrawDone(no, n) {
+    try { setData(await call('adminSetDrawDone', S.token, no, n)); toast('저장했어요.'); } catch (e) { toast(e.message, true); }
+  }
+
   function renderManual() {
     const d = S.data;
     const valid = new Set(d.students.map((s) => s.no));
@@ -455,7 +491,7 @@
   function switchTab(tab) {
     S.tab = tab;
     document.querySelectorAll('#tabs .tab').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
-    ['overview', 'quest', 'praise', 'spy', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
+    ['overview', 'quest', 'praise', 'spy', 'reward', 'manual', 'ledger', 'settings'].forEach((t) => $('tab-' + t).classList.toggle('hidden', t !== tab));
   }
 
   async function submitManual() {
@@ -527,6 +563,8 @@
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
   $('spyBtn').onclick = appointSpy;
+  $('drawOnly').addEventListener('change', renderReward);
+  $('drawTable').onclick = (e) => { const b = e.target.closest('[data-draw]'); if (b && !b.disabled) setDrawDone(b.dataset.draw, Number(b.dataset.n)); };
   $('spyHist').onclick = (e) => { const b = e.target.closest('[data-dismiss]'); if (b) dismissSpy(Number(b.dataset.dismiss)); };
   $('spyWeeks').onclick = (e) => {
     const a = e.target.closest('[data-week]'); if (!a) return; e.preventDefault();
