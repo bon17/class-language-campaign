@@ -20,7 +20,7 @@ const DEFAULT_TIMETABLE = [
 ];
 
 function getTimetable_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(CACHE_KEYS.TIMETABLE);
   if (hit) return JSON.parse(hit);
   const tt = { periods: [], week: { 1: [], 2: [], 3: [], 4: [], 5: [] }, overrides: {} };

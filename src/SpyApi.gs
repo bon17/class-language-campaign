@@ -9,7 +9,7 @@
  * - 실패하면 기회만 소진. 결과는 본인에게만 (설정 "지목 결과 공개" ON이면 검거 소식 공개)
  */
 
-const SPY_HEADERS = ['주차', '학생번호', '시작일', '종료일', '상태', '변경시각'];
+const SPY_HEADERS = ['주차', '학생번호', '시작일', '종료일', '상태', '변경시각', '안내확인'];
 const SPY_JUDGE_HEADERS = ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위', '타임스탬프', '정산여부', '정산시각', '활동보상처리'];
 const JC = { SETTLED: 10, SETTLED_AT: 11, REWARD: 12 }; // 1부터 센 열 번호
 const ACCUSE_HEADERS = ['타임스탬프', '지목한번호', '지목된번호', '결과', '날짜', '이전도장수'];
@@ -28,6 +28,7 @@ function readSpies_() {
     start: toDateStr_(r[2]),
     end: toDateStr_(r[3]),
     status: String(r[4]).trim() || '활동중',
+    introSeen: bool_(r[6]), // 처음 지정 안내 팝업을 봤는지
   })).filter((s) => s.no && s.start && s.end);
 }
 
@@ -79,7 +80,7 @@ function campaignWeeks_() {
 /** 투투 화면용 요약 (데이터 버전으로 캐시) */
 function getSpyData_() {
   const ver = dataVersion_();
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(`spy_${ver}`);
   if (hit) return JSON.parse(hit);
   const sv = staleVersion_('spy');
@@ -123,12 +124,25 @@ function spyHomeFor_(me, today) {
       judgedToday: d.judgedDates.indexOf(today) >= 0,
       reward: SPY_REWARD,
       pendingReward: (d.pendingReward || {})[me.no] || 0,
+      introSeen: !!active.introSeen,
     };
   }
   return out;
 }
 
 // ---------- 암행어사 판정 ----------
+
+/** 처음 지정 안내 팝업을 봤다고 기록 (한 번만 뜨게) */
+function spyAck(token) {
+  const me = requireStudent_(token);
+  withLock_(() => {
+    const active = activeSpy_(readSpies_(), todayStr_());
+    if (!active || active.no !== me.no || active.introSeen) return;
+    sheet_(SHEETS.SPY).getRange(active.row, 7).setValue(true);
+    invalidateStats_();
+  });
+  return true;
+}
 
 /** good: [1위, 2위, 3위] 번호 (3명 모두), bad: 0~3명 번호 (순서대로) */
 function spyJudge(token, good, bad) {
@@ -226,7 +240,7 @@ function adminAppointSpy(token, payload) {
     if (overlap) throw new Error(`기간이 겹치는 활동 중인 암행어사가 있어요 (${overlap.start.slice(5)}~${overlap.end.slice(5)}). 먼저 해임해 주세요.`);
     const week = String(p.week || (campaignWeeks_().find((w) => w.start <= start && start <= w.end) || {}).week || '');
     const sh = sheet_(SHEETS.SPY);
-    sh.getRange(sh.getLastRow() + 1, 1, 1, SPY_HEADERS.length).setValues([[week, no, start, end, '활동중', new Date()]]);
+    sh.getRange(sh.getLastRow() + 1, 1, 1, SPY_HEADERS.length).setValues([[week, no, start, end, '활동중', new Date(), false]]);
     invalidateStats_();
   });
   return buildAdminDashboard_();

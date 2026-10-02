@@ -37,6 +37,9 @@ htmlFiles.forEach((f) => {
   parts.push(`  ${JSON.stringify(f.slice(0, -5))}: \`${html}\`,`);
 });
 parts.push('};');
+// 코드 버전(내용 해시): 캐시 키를 버전별로 나누는 데 쓴다
+const build = require('crypto').createHash('sha1').update(parts.join('\n')).digest('hex').slice(0, 8);
+parts.push(`const BUNDLE_BUILD = '${build}';`);
 parts.push('');
 
 fs.mkdirSync(path.dirname(out), { recursive: true });

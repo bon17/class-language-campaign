@@ -90,10 +90,39 @@ function sheet_(name) {
   return sh;
 }
 
+/** 코드 버전. 한 파일 묶음(dist)에서는 bundle.js가 BUNDLE_BUILD를 넣어 준다. */
+function appBuild_() {
+  return typeof BUNDLE_BUILD !== 'undefined' ? BUNDLE_BUILD : 'src';
+}
+
+/**
+ * 스크립트 캐시. 키 앞에 코드 버전을 붙여, 예전 배포(옛 주소로 열린 탭 등)가 실행돼도
+ * 서로 다른 모양의 캐시가 섞이지 않게 한다.
+ */
+function cache_() {
+  const c = CacheService.getScriptCache();
+  const p = appBuild_() + ':';
+  return {
+    get: (k) => c.get(p + k),
+    put: (k, v, t) => c.put(p + k, v, t),
+    putAll: (o, t) => {
+      const x = {};
+      Object.keys(o).forEach((k) => (x[p + k] = o[k]));
+      c.putAll(x, t);
+    },
+    remove: (k) => c.remove(p + k),
+    removeAll: (ks) => c.removeAll(ks.map((k) => p + k)),
+  };
+}
+
 function getConfig() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(CACHE_KEYS.CONFIG);
-  if (hit) return JSON.parse(hit);
+  if (hit) {
+    const cached = JSON.parse(hit);
+    // 빠진 항목이 있으면(다른 버전이 만든 캐시 등) 시트에서 다시 읽는다
+    if (CONFIG_DEFS.every((d) => d.key in cached) && 'teacherList' in cached) return cached;
+  }
   const cfg = readConfigFromSheet_();
   cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
   return cfg;
@@ -162,7 +191,7 @@ function setConfigValue_(key, value) {
   const idx = labels.indexOf(d.label);
   if (idx >= 0) sh.getRange(idx + 2, 2).setValue(toSheetValue_(d, value));
   else sh.appendRow([d.label, toSheetValue_(d, value), d.desc]);
-  CacheService.getScriptCache().remove(CACHE_KEYS.CONFIG);
+  cache_().remove(CACHE_KEYS.CONFIG);
 }
 
 /** "교과선생님" 시트: 과목 | 선생님 이름 (이름이 빈 줄은 건너뜀) */

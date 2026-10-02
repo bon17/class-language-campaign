@@ -47,7 +47,7 @@ function readStudents_() {
 
 /** readStudents_ 캐시판 (서버 내부 전용, 로그인 코드 포함) */
 function getStudentsCached_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(CACHE_KEYS.STUDENTS);
   if (hit) return JSON.parse(hit);
   const list = readStudents_();
@@ -142,7 +142,7 @@ function cancelRecord_(id, reason, by) {
 const CACHE_TTL_SEC = 1800;
 
 function dataVersion_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   let v = cache.get('data_ver');
   if (!v) {
     v = String(Date.now());
@@ -152,7 +152,7 @@ function dataVersion_() {
 }
 
 function invalidateStats_() {
-  CacheService.getScriptCache().put('data_ver', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
+  cache_().put('data_ver', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
 }
 
 /**
@@ -166,7 +166,7 @@ const STALE_MS = 45 * 1000;
 /** 정확한 버전이 없을 때 쓸 수 있는 최근 버전 (없으면 null) */
 function staleVersion_(kind) {
   if (!ALLOW_STALE_) return null;
-  const hit = CacheService.getScriptCache().get(`last_${kind}_${todayStr_()}`);
+  const hit = cache_().get(`last_${kind}_${todayStr_()}`);
   if (!hit) return null;
   const last = JSON.parse(hit);
   return Date.now() - last.at < STALE_MS ? last.ver : null;
@@ -174,7 +174,7 @@ function staleVersion_(kind) {
 
 /** 캐시된 전체 통계 (로그인 코드·입력자 등 민감정보 없음). prev = 직전 등교일 기준 순위 */
 function getStats_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const today = todayStr_();
   const hit = cache.get(`stats_${dataVersion_()}_${today}`);
   if (hit) return JSON.parse(hit);
@@ -185,7 +185,7 @@ function getStats_() {
 
 /** 투투 한 명의 기록 요약 (캐시) */
 function getStudentHistory_(no) {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const today = todayStr_();
   const hit = cache.get(`hist_${dataVersion_()}_${today}_${no}`);
   if (hit) return JSON.parse(hit);
@@ -255,7 +255,7 @@ function buildDataBundle_() {
   Object.keys(hist).forEach((no) => (put[`hist_${ver}_${today}_${no}`] = JSON.stringify(hist[no])));
   put[`last_bundle_${today}`] = JSON.stringify({ ver, at: Date.now() });
   try {
-    CacheService.getScriptCache().putAll(put, CACHE_TTL_SEC);
+    cache_().putAll(put, CACHE_TTL_SEC);
   } catch (e) {
     // 캐시 용량 초과 등은 무시 (다음 요청에서 다시 계산)
   }

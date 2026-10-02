@@ -97,10 +97,39 @@ function sheet_(name) {
   return sh;
 }
 
+/** 코드 버전. 한 파일 묶음(dist)에서는 bundle.js가 BUNDLE_BUILD를 넣어 준다. */
+function appBuild_() {
+  return typeof BUNDLE_BUILD !== 'undefined' ? BUNDLE_BUILD : 'src';
+}
+
+/**
+ * 스크립트 캐시. 키 앞에 코드 버전을 붙여, 예전 배포(옛 주소로 열린 탭 등)가 실행돼도
+ * 서로 다른 모양의 캐시가 섞이지 않게 한다.
+ */
+function cache_() {
+  const c = CacheService.getScriptCache();
+  const p = appBuild_() + ':';
+  return {
+    get: (k) => c.get(p + k),
+    put: (k, v, t) => c.put(p + k, v, t),
+    putAll: (o, t) => {
+      const x = {};
+      Object.keys(o).forEach((k) => (x[p + k] = o[k]));
+      c.putAll(x, t);
+    },
+    remove: (k) => c.remove(p + k),
+    removeAll: (ks) => c.removeAll(ks.map((k) => p + k)),
+  };
+}
+
 function getConfig() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(CACHE_KEYS.CONFIG);
-  if (hit) return JSON.parse(hit);
+  if (hit) {
+    const cached = JSON.parse(hit);
+    // 빠진 항목이 있으면(다른 버전이 만든 캐시 등) 시트에서 다시 읽는다
+    if (CONFIG_DEFS.every((d) => d.key in cached) && 'teacherList' in cached) return cached;
+  }
   const cfg = readConfigFromSheet_();
   cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
   return cfg;
@@ -169,7 +198,7 @@ function setConfigValue_(key, value) {
   const idx = labels.indexOf(d.label);
   if (idx >= 0) sh.getRange(idx + 2, 2).setValue(toSheetValue_(d, value));
   else sh.appendRow([d.label, toSheetValue_(d, value), d.desc]);
-  CacheService.getScriptCache().remove(CACHE_KEYS.CONFIG);
+  cache_().remove(CACHE_KEYS.CONFIG);
 }
 
 /** "교과선생님" 시트: 과목 | 선생님 이름 (이름이 빈 줄은 건너뜀) */
@@ -276,7 +305,7 @@ function readStudents_() {
 
 /** readStudents_ 캐시판 (서버 내부 전용, 로그인 코드 포함) */
 function getStudentsCached_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(CACHE_KEYS.STUDENTS);
   if (hit) return JSON.parse(hit);
   const list = readStudents_();
@@ -371,7 +400,7 @@ function cancelRecord_(id, reason, by) {
 const CACHE_TTL_SEC = 1800;
 
 function dataVersion_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   let v = cache.get('data_ver');
   if (!v) {
     v = String(Date.now());
@@ -381,7 +410,7 @@ function dataVersion_() {
 }
 
 function invalidateStats_() {
-  CacheService.getScriptCache().put('data_ver', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
+  cache_().put('data_ver', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
 }
 
 /**
@@ -395,7 +424,7 @@ const STALE_MS = 45 * 1000;
 /** 정확한 버전이 없을 때 쓸 수 있는 최근 버전 (없으면 null) */
 function staleVersion_(kind) {
   if (!ALLOW_STALE_) return null;
-  const hit = CacheService.getScriptCache().get(`last_${kind}_${todayStr_()}`);
+  const hit = cache_().get(`last_${kind}_${todayStr_()}`);
   if (!hit) return null;
   const last = JSON.parse(hit);
   return Date.now() - last.at < STALE_MS ? last.ver : null;
@@ -403,7 +432,7 @@ function staleVersion_(kind) {
 
 /** 캐시된 전체 통계 (로그인 코드·입력자 등 민감정보 없음). prev = 직전 등교일 기준 순위 */
 function getStats_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const today = todayStr_();
   const hit = cache.get(`stats_${dataVersion_()}_${today}`);
   if (hit) return JSON.parse(hit);
@@ -414,7 +443,7 @@ function getStats_() {
 
 /** 투투 한 명의 기록 요약 (캐시) */
 function getStudentHistory_(no) {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const today = todayStr_();
   const hit = cache.get(`hist_${dataVersion_()}_${today}_${no}`);
   if (hit) return JSON.parse(hit);
@@ -484,7 +513,7 @@ function buildDataBundle_() {
   Object.keys(hist).forEach((no) => (put[`hist_${ver}_${today}_${no}`] = JSON.stringify(hist[no])));
   put[`last_bundle_${today}`] = JSON.stringify({ ver, at: Date.now() });
   try {
-    CacheService.getScriptCache().putAll(put, CACHE_TTL_SEC);
+    cache_().putAll(put, CACHE_TTL_SEC);
   } catch (e) {
     // 캐시 용량 초과 등은 무시 (다음 요청에서 다시 계산)
   }
@@ -554,7 +583,7 @@ const DEFAULT_TIMETABLE = [
 ];
 
 function getTimetable_() {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(CACHE_KEYS.TIMETABLE);
   if (hit) return JSON.parse(hit);
   const tt = { periods: [], week: { 1: [], 2: [], 3: [], 4: [], 5: [] }, overrides: {} };
@@ -891,7 +920,7 @@ function withNotice_(home, stamped, msg) {
  * - 실패하면 기회만 소진. 결과는 본인에게만 (설정 "지목 결과 공개" ON이면 검거 소식 공개)
  */
 
-const SPY_HEADERS = ['주차', '학생번호', '시작일', '종료일', '상태', '변경시각'];
+const SPY_HEADERS = ['주차', '학생번호', '시작일', '종료일', '상태', '변경시각', '안내확인'];
 const SPY_JUDGE_HEADERS = ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위', '타임스탬프', '정산여부', '정산시각', '활동보상처리'];
 const JC = { SETTLED: 10, SETTLED_AT: 11, REWARD: 12 }; // 1부터 센 열 번호
 const ACCUSE_HEADERS = ['타임스탬프', '지목한번호', '지목된번호', '결과', '날짜', '이전도장수'];
@@ -910,6 +939,7 @@ function readSpies_() {
     start: toDateStr_(r[2]),
     end: toDateStr_(r[3]),
     status: String(r[4]).trim() || '활동중',
+    introSeen: bool_(r[6]), // 처음 지정 안내 팝업을 봤는지
   })).filter((s) => s.no && s.start && s.end);
 }
 
@@ -961,7 +991,7 @@ function campaignWeeks_() {
 /** 투투 화면용 요약 (데이터 버전으로 캐시) */
 function getSpyData_() {
   const ver = dataVersion_();
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const hit = cache.get(`spy_${ver}`);
   if (hit) return JSON.parse(hit);
   const sv = staleVersion_('spy');
@@ -1005,12 +1035,25 @@ function spyHomeFor_(me, today) {
       judgedToday: d.judgedDates.indexOf(today) >= 0,
       reward: SPY_REWARD,
       pendingReward: (d.pendingReward || {})[me.no] || 0,
+      introSeen: !!active.introSeen,
     };
   }
   return out;
 }
 
 // ---------- 암행어사 판정 ----------
+
+/** 처음 지정 안내 팝업을 봤다고 기록 (한 번만 뜨게) */
+function spyAck(token) {
+  const me = requireStudent_(token);
+  withLock_(() => {
+    const active = activeSpy_(readSpies_(), todayStr_());
+    if (!active || active.no !== me.no || active.introSeen) return;
+    sheet_(SHEETS.SPY).getRange(active.row, 7).setValue(true);
+    invalidateStats_();
+  });
+  return true;
+}
 
 /** good: [1위, 2위, 3위] 번호 (3명 모두), bad: 0~3명 번호 (순서대로) */
 function spyJudge(token, good, bad) {
@@ -1108,7 +1151,7 @@ function adminAppointSpy(token, payload) {
     if (overlap) throw new Error(`기간이 겹치는 활동 중인 암행어사가 있어요 (${overlap.start.slice(5)}~${overlap.end.slice(5)}). 먼저 해임해 주세요.`);
     const week = String(p.week || (campaignWeeks_().find((w) => w.start <= start && start <= w.end) || {}).week || '');
     const sh = sheet_(SHEETS.SPY);
-    sh.getRange(sh.getLastRow() + 1, 1, 1, SPY_HEADERS.length).setValues([[week, no, start, end, '활동중', new Date()]]);
+    sh.getRange(sh.getLastRow() + 1, 1, 1, SPY_HEADERS.length).setValues([[week, no, start, end, '활동중', new Date(), false]]);
     invalidateStats_();
   });
   return buildAdminDashboard_();
@@ -1290,18 +1333,18 @@ const LOGIN_FAIL_WINDOW_SEC = 600;
 
 function issueToken_(session) {
   const token = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 8);
-  CacheService.getScriptCache().put('tok_' + token, JSON.stringify(session), TOKEN_TTL_SEC);
+  cache_().put('tok_' + token, JSON.stringify(session), TOKEN_TTL_SEC);
   return token;
 }
 
 function readToken_(token) {
   if (!token || typeof token !== 'string' || token.length > 64) return null;
-  const v = CacheService.getScriptCache().get('tok_' + token);
+  const v = cache_().get('tok_' + token);
   return v ? JSON.parse(v) : null;
 }
 
 function logout(token) {
-  if (token && typeof token === 'string') CacheService.getScriptCache().remove('tok_' + token);
+  if (token && typeof token === 'string') cache_().remove('tok_' + token);
   return true;
 }
 
@@ -1312,12 +1355,12 @@ function requireAdmin_(token) {
 }
 
 function checkLoginRate_(bucket, limit) {
-  const n = Number(CacheService.getScriptCache().get('fail_' + bucket) || 0);
+  const n = Number(cache_().get('fail_' + bucket) || 0);
   if (n >= (limit || LOGIN_FAIL_LIMIT)) throw new Error('로그인 실패가 너무 많아요. 10분 뒤 다시 시도해 주세요.');
 }
 
 function recordLoginFail_(bucket) {
-  const cache = CacheService.getScriptCache();
+  const cache = cache_();
   const n = Number(cache.get('fail_' + bucket) || 0) + 1;
   cache.put('fail_' + bucket, String(n), LOGIN_FAIL_WINDOW_SEC);
   Utilities.sleep(700);
@@ -1455,8 +1498,8 @@ function sheetDefs_() {
  * 웹앱 요청에서도 호출되므로 6시간에 한 번만 실제로 검사한다.
  */
 function ensureSchema_(force) {
-  const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v10')) return;
+  const cache = cache_();
+  if (!force && cache.get('schema_ok_v11')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -1488,7 +1531,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v10', '1', 21600);
+  cache.put('schema_ok_v11', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -1505,7 +1548,7 @@ function ensureConfigRows_(ss) {
   });
   if (add.length) {
     sh.getRange(sh.getLastRow() + 1, 1, add.length, 3).setValues(add);
-    CacheService.getScriptCache().remove(CACHE_KEYS.CONFIG);
+    cache_().remove(CACHE_KEYS.CONFIG);
   }
 }
 
@@ -1650,7 +1693,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v10']);
+  cache_().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v11']);
   invalidateStats_();
 }
 
@@ -3066,6 +3109,11 @@ const HTML_SOURCES = {
     .jump a:active { background: var(--sky); color: #04203d; }
     .box, .space { scroll-margin-top: 60px; }
 
+    #spyToggle { position: relative; }
+    #spyToggle.dot::after { content: ''; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); box-shadow: 0 0 6px var(--red); }
+    .intro { text-align: center; }
+    .intro .big { font-size: 56px; line-height: 1; margin: 6px 0 10px; }
+    .intro p { margin: 8px 0; line-height: 1.6; word-break: keep-all; }
     .rule-list { margin: 6px 0 10px; padding-left: 20px; }
     .rule-list li { margin: 6px 0; line-height: 1.55; }
     #rules details { border-bottom: 1px solid #ffffff14; padding: 4px 0; }
@@ -3562,6 +3610,14 @@ const HTML_SOURCES = {
     if (!m) S.spyOpen = false;
     $('spyBox').classList.toggle('hidden', !m || !S.spyOpen);
     $('spyToggle').textContent = S.spyOpen ? '🔓' : '🔒';
+    // 오늘 판정을 아직 안 냈으면 자물쇠에 작은 빨간 점
+    $('spyToggle').classList.toggle('dot', !!m && m.isSchoolDay && !m.judgedToday && !S.spyOpen);
+    // 처음 지정됐을 때 딱 한 번 안내 팝업
+    const introKey = m ? \`spyIntro:\${d.me.no}:\${m.start}\` : '';
+    if (m && !m.introSeen && !S.introShown && !load(introKey)) {
+      S.introShown = true;
+      showSpyIntro(m);
+    }
     if (m && S.spyOpen && !$('spyBox').contains(document.activeElement)) {
       const head = \`<div class="row"><h2 class="title-font grow" style="margin:0">🕵️ 암행어사 임무 <span class="secret">나만 보여요 · 비밀!</span></h2>
           <button class="btn sm ghost" style="flex:0 0 auto" id="spyClose">닫기 🔒</button></div>
@@ -3599,6 +3655,27 @@ const HTML_SOURCES = {
     $('newsBox').innerHTML = d.spy.news.length
       ? '<h3>📰 검거 소식</h3>' + d.spy.news.map((n) => \`<div class="news">🚨 \${md(n.date)} <b>\${esc(n.accuser)}</b>이(가) 암행어사 <b>\${esc(n.spy)}</b>을(를) 검거! (도장 \${n.moved}개 이동)</div>\`).join('')
       : '';
+  }
+
+  function showSpyIntro(m) {
+    const root = $('modal-root');
+    root.innerHTML = \`<div class="modal-bg"><div class="modal"><div class="box spybox intro">
+        <div class="big">🕵️</div>
+        <h2 class="title-font" style="font-size:24px">비밀 임무 도착!</h2>
+        <p><b class="yellow">\${esc(S.data.me.name)}</b>, 이번 주 <b>욕설 암행어사</b>로 선정되었어요!<br>
+          <span class="muted">임기: \${md(m.start)} ~ \${md(m.end)}</span></p>
+        <p>매일 친구들의 언어를 몰래 관찰하고<br><b>바른 언어 TOP 3 · 나쁜 언어 TOP 3</b>을 판정해 주세요.<br>판정할 때마다 활동 보상 <b class="yellow">+\${m.reward}</b>!</p>
+        <p>🔒 화면 위쪽 <b>자물쇠 버튼</b>을 누르면 임무 창이 열려요.</p>
+        <p class="minus" style="font-weight:700">🤫 친구들에게 들키면 검거돼서 보상을 모두 빼앗겨요. 절대 비밀!</p>
+        <button class="btn yellow block" id="introOk" style="margin-top:10px">임무 시작하기</button>
+      </div></div></div>\`;
+    $('introOk').onclick = () => {
+      root.innerHTML = '';
+      S.spyOpen = true; S.lastKey = ''; render();
+      $('spyBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      store(\`spyIntro:\${S.data.me.no}:\${m.start}\`, '1');
+      call('spyAck', S.token).catch(() => {}); // 다시 뜨지 않게 서버에도 기록 (다른 기기에서도 안 뜸)
+    };
   }
 
   function confirmBox(title, html, okText) {
@@ -4192,3 +4269,4 @@ const HTML_SOURCES = {
 </html>
 `,
 };
+const BUNDLE_BUILD = 'ba8834b1';

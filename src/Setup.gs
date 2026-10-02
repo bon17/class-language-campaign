@@ -26,8 +26,8 @@ function sheetDefs_() {
  * 웹앱 요청에서도 호출되므로 6시간에 한 번만 실제로 검사한다.
  */
 function ensureSchema_(force) {
-  const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v10')) return;
+  const cache = cache_();
+  if (!force && cache.get('schema_ok_v11')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -59,7 +59,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v10', '1', 21600);
+  cache.put('schema_ok_v11', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -76,7 +76,7 @@ function ensureConfigRows_(ss) {
   });
   if (add.length) {
     sh.getRange(sh.getLastRow() + 1, 1, add.length, 3).setValues(add);
-    CacheService.getScriptCache().remove(CACHE_KEYS.CONFIG);
+    cache_().remove(CACHE_KEYS.CONFIG);
   }
 }
 
@@ -221,7 +221,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v10']);
+  cache_().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v11']);
   invalidateStats_();
 }
 
