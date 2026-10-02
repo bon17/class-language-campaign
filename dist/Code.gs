@@ -29,6 +29,7 @@ const SHEETS = {
 
 // type: string | int | bool | date | dateList | list | code
 const CONFIG_DEFS = [
+  { key: 'webAppUrl', label: '웹앱 주소', type: 'string', def: '', desc: '배포 → 배포 관리에서 복사한 …/exec 주소. 메뉴 [웹앱 주소 보기]가 이 주소를 보여 줌' },
   { key: 'campaignName', label: '캠페인명', type: 'string', def: '바른 언어 사용하고, 보상 얻자!!', desc: '화면 맨 위 제목' },
   { key: 'subtitle', label: '부제', type: 'string', def: '투투퀘스트 달성하고 랭킹권에 도전해라', desc: '제목 아래 한 줄' },
   { key: 'nickname', label: '학생 호칭', type: 'string', def: '투투', desc: '화면에서 학생을 부르는 이름' },
@@ -1364,7 +1365,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v8')) return;
+  if (!force && cache.get('schema_ok_v9')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -1396,7 +1397,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v8', '1', 21600);
+  cache.put('schema_ok_v9', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -1541,8 +1542,14 @@ function reissueSelectedLoginCodes() {
 }
 
 function showWebAppUrls() {
-  const url = ScriptApp.getService().getUrl();
-  if (!url) return alert_('아직 웹앱으로 배포되지 않았어요. README의 배포 방법을 참고해 주세요.');
+  const url = String(readConfigFromSheet_().webAppUrl || '').trim().replace(/\?.*$/, '');
+  if (!/^https:\/\/script\.google\.com\/.*\/exec$/.test(url)) {
+    return alert_(
+      '설정 시트의 "웹앱 주소" 칸이 비어 있거나 올바르지 않아요.\n\n' +
+      'Apps Script 편집기 → 배포 → 배포 관리 → 웹 앱 URL "복사"를 눌러\n' +
+      '설정 시트 "웹앱 주소" 칸에 붙여 넣어 주세요. (…/exec 로 끝나는 주소)'
+    );
+  }
   alert_(`투투 화면:\n${url}\n\n교과 선생님 화면:\n${url}?page=teacher\n\n담임 대시보드:\n${url}?page=admin`);
 }
 
@@ -1552,7 +1559,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v8']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v9']);
   invalidateStats_();
 }
 

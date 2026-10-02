@@ -22,6 +22,7 @@ const SHEETS = {
 
 // type: string | int | bool | date | dateList | list | code
 const CONFIG_DEFS = [
+  { key: 'webAppUrl', label: '웹앱 주소', type: 'string', def: '', desc: '배포 → 배포 관리에서 복사한 …/exec 주소. 메뉴 [웹앱 주소 보기]가 이 주소를 보여 줌' },
   { key: 'campaignName', label: '캠페인명', type: 'string', def: '바른 언어 사용하고, 보상 얻자!!', desc: '화면 맨 위 제목' },
   { key: 'subtitle', label: '부제', type: 'string', def: '투투퀘스트 달성하고 랭킹권에 도전해라', desc: '제목 아래 한 줄' },
   { key: 'nickname', label: '학생 호칭', type: 'string', def: '투투', desc: '화면에서 학생을 부르는 이름' },
