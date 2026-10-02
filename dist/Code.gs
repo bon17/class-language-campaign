@@ -59,14 +59,40 @@ const CONFIG_DEFS = [
 
 const CACHE_KEYS = { CONFIG: 'config_v1', STUDENTS: 'students_v1', TIMETABLE: 'timetable_v1' };
 
-/** 스프레드시트 핸들. 초기 세팅 때 ID를 저장해 두면 웹앱에서도 확실히 같은 파일을 연다. */
+/**
+ * 스프레드시트 핸들. 초기 세팅 때 ID를 저장해 두면 웹앱에서도 확실히 같은 파일을 연다.
+ * 파일 열기는 느리므로 한 번의 실행(요청) 안에서는 한 번만 열고 재사용한다.
+ */
+let SS_MEMO_ = null;
+const SHEET_MEMO_ = {};
+
 function ss_() {
+  if (SS_MEMO_) return SS_MEMO_;
   const id = PropertiesService.getScriptProperties().getProperty('SS_ID');
-  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActive();
+  SS_MEMO_ = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActive();
+  return SS_MEMO_;
+}
+
+/** 시트 찾기 (없으면 null). 찾은 시트는 실행 동안 기억한다. */
+function sheetByName_(name) {
+  if (SHEET_MEMO_[name]) return SHEET_MEMO_[name];
+  const sh = ss_().getSheetByName(name);
+  if (sh) SHEET_MEMO_[name] = sh;
+  return sh;
+}
+
+/** 머리글을 뺀 데이터 행을 한 번의 요청으로 읽는다 (행 i → 시트 i+2행). 열 수는 ncols로 맞춘다. */
+function dataRows_(sh, ncols) {
+  if (!sh) return [];
+  return sh.getDataRange().getValues().slice(1).map((r) => {
+    const row = r.slice(0, ncols);
+    while (row.length < ncols) row.push('');
+    return row;
+  });
 }
 
 function sheet_(name) {
-  const sh = ss_().getSheetByName(name);
+  const sh = sheetByName_(name);
   if (!sh) throw new Error(`"${name}" 시트가 없어요. 메뉴에서 [시트 초기 세팅]을 먼저 실행해 주세요.`);
   return sh;
 }
@@ -82,9 +108,9 @@ function getConfig() {
 
 function readConfigFromSheet_() {
   const raw = {};
-  const sh = ss_().getSheetByName(SHEETS.CONFIG);
-  if (sh && sh.getLastRow() > 1) {
-    sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach((r) => {
+  const sh = sheetByName_(SHEETS.CONFIG);
+  if (sh) {
+    dataRows_(sh, 2).forEach((r) => {
       const label = String(r[0]).trim();
       if (label) raw[label] = r[1];
     });
@@ -148,10 +174,9 @@ function setConfigValue_(key, value) {
 
 /** "교과선생님" 시트: 과목 | 선생님 이름 (이름이 빈 줄은 건너뜀) */
 function readTeacherSheet_() {
-  const sh = ss_().getSheetByName(SHEETS.TEACHERS);
-  if (!sh || sh.getLastRow() < 2) return [];
+  const sh = sheetByName_(SHEETS.TEACHERS);
   const seen = {};
-  return sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues()
+  return dataRows_(sh, 2)
     .map((r) => ({ subject: String(r[0]).trim(), name: String(r[1]).trim() }))
     .filter((t) => t.name && !seen[t.name] && (seen[t.name] = true));
 }
@@ -238,10 +263,7 @@ function withLock_(fn) {
 
 /** 학생 시트 전체(로그인 코드 포함). 서버 내부 전용 — 클라이언트로 그대로 내보내지 말 것. */
 function readStudents_() {
-  const sh = sheet_(SHEETS.STUDENTS);
-  const last = sh.getLastRow();
-  if (last < 2) return [];
-  return sh.getRange(2, 1, last - 1, STUDENT_HEADERS.length).getValues()
+  return dataRows_(sheet_(SHEETS.STUDENTS), STUDENT_HEADERS.length)
     .map((r, i) => ({
       row: i + 2,
       no: String(r[0]).trim(),
@@ -265,10 +287,7 @@ function getStudentsCached_() {
 // ---------- 기록장 읽기/쓰기 ----------
 
 function readLedger_() {
-  const sh = sheet_(SHEETS.LEDGER);
-  const last = sh.getLastRow();
-  if (last < 2) return [];
-  return sh.getRange(2, 1, last - 1, LEDGER_HEADERS.length).getValues().map((r, i) => ({
+  return dataRows_(sheet_(SHEETS.LEDGER), LEDGER_HEADERS.length).map((r, i) => ({
     row: i + 2,
     ts: r[LC['타임스탬프']] instanceof Date ? Utilities.formatDate(r[LC['타임스탬프']], TZ, 'yyyy-MM-dd HH:mm:ss') : String(r[LC['타임스탬프']]),
     date: toDateStr_(r[LC['날짜']]),
@@ -365,18 +384,43 @@ function invalidateStats_() {
   CacheService.getScriptCache().put('data_ver', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
 }
 
+/**
+ * 자동 갱신(30초 폴링)처럼 "조금 지난 데이터여도 되는" 요청에서 true로 둔다.
+ * 그러면 다른 사람이 방금 기록해 버전이 바뀌었어도, 45초 안에 만든 최신 계산 결과를 재사용한다.
+ * 본인이 버튼을 누른 요청은 false(기본) → 항상 새로 계산.
+ */
+let ALLOW_STALE_ = false;
+const STALE_MS = 45 * 1000;
+
+/** 정확한 버전이 없을 때 쓸 수 있는 최근 버전 (없으면 null) */
+function staleVersion_(kind) {
+  if (!ALLOW_STALE_) return null;
+  const hit = CacheService.getScriptCache().get(`last_${kind}_${todayStr_()}`);
+  if (!hit) return null;
+  const last = JSON.parse(hit);
+  return Date.now() - last.at < STALE_MS ? last.ver : null;
+}
+
 /** 캐시된 전체 통계 (로그인 코드·입력자 등 민감정보 없음). prev = 직전 등교일 기준 순위 */
 function getStats_() {
-  const key = `stats_${dataVersion_()}_${todayStr_()}`;
-  const hit = CacheService.getScriptCache().get(key);
-  return hit ? JSON.parse(hit) : buildDataBundle_().stats;
+  const cache = CacheService.getScriptCache();
+  const today = todayStr_();
+  const hit = cache.get(`stats_${dataVersion_()}_${today}`);
+  if (hit) return JSON.parse(hit);
+  const sv = staleVersion_('bundle');
+  const stale = sv && cache.get(`stats_${sv}_${today}`);
+  return stale ? JSON.parse(stale) : buildDataBundle_().stats;
 }
 
 /** 투투 한 명의 기록 요약 (캐시) */
 function getStudentHistory_(no) {
-  const key = `hist_${dataVersion_()}_${todayStr_()}_${no}`;
-  const hit = CacheService.getScriptCache().get(key);
+  const cache = CacheService.getScriptCache();
+  const today = todayStr_();
+  const hit = cache.get(`hist_${dataVersion_()}_${today}_${no}`);
   if (hit) return JSON.parse(hit);
+  const sv = staleVersion_('bundle');
+  const stale = sv && cache.get(`hist_${sv}_${today}_${no}`);
+  if (stale) return JSON.parse(stale);
   return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null, drawDone: 0 };
 }
 
@@ -438,6 +482,7 @@ function buildDataBundle_() {
   const put = {};
   put[`stats_${ver}_${today}`] = JSON.stringify(stats);
   Object.keys(hist).forEach((no) => (put[`hist_${ver}_${today}_${no}`] = JSON.stringify(hist[no])));
+  put[`last_bundle_${today}`] = JSON.stringify({ ver, at: Date.now() });
   try {
     CacheService.getScriptCache().putAll(put, CACHE_TTL_SEC);
   } catch (e) {
@@ -513,18 +558,18 @@ function getTimetable_() {
   const hit = cache.get(CACHE_KEYS.TIMETABLE);
   if (hit) return JSON.parse(hit);
   const tt = { periods: [], week: { 1: [], 2: [], 3: [], 4: [], 5: [] }, overrides: {} };
-  const sh = ss_().getSheetByName(SHEETS.TIMETABLE);
-  if (sh && sh.getLastRow() > 1) {
-    sh.getRange(2, 1, sh.getLastRow() - 1, TIMETABLE_HEADERS.length).getValues().forEach((r) => {
+  const sh = sheetByName_(SHEETS.TIMETABLE);
+  if (sh) {
+    dataRows_(sh, TIMETABLE_HEADERS.length).forEach((r) => {
       const p = parseInt(r[0], 10);
       if (!p) return;
       tt.periods.push({ period: p, start: toTimeStr_(r[1]) });
       for (let w = 1; w <= 5; w++) tt.week[w][p] = String(r[w + 1]).trim();
     });
   }
-  const ov = ss_().getSheetByName(SHEETS.TT_OVERRIDE);
-  if (ov && ov.getLastRow() > 1) {
-    ov.getRange(2, 1, ov.getLastRow() - 1, TT_OVERRIDE_HEADERS.length).getValues().forEach((r) => {
+  const ov = sheetByName_(SHEETS.TT_OVERRIDE);
+  if (ov) {
+    dataRows_(ov, TT_OVERRIDE_HEADERS.length).forEach((r) => {
       const d = toDateStr_(r[0]);
       if (!d) return;
       const subjects = {};
@@ -602,9 +647,8 @@ const bool_ = (v) => v === true || String(v).toUpperCase() === 'TRUE';
 // ---------- 시트 읽기/쓰기 ----------
 
 function readQuestRows_() {
-  const sh = ss_().getSheetByName(SHEETS.QUEST);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, QUEST_HEADERS.length).getValues().map((r, i) => ({
+  const sh = sheetByName_(SHEETS.QUEST);
+  return dataRows_(sh, QUEST_HEADERS.length).map((r, i) => ({
     row: i + 2,
     date: toDateStr_(r[0]),
     no: String(r[1]).trim(),
@@ -637,9 +681,8 @@ function writeQuestRow_(q) {
 }
 
 function readPraise_() {
-  const sh = ss_().getSheetByName(SHEETS.PRAISE);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, PRAISE_HEADERS.length).getValues().map((r, i) => ({
+  const sh = sheetByName_(SHEETS.PRAISE);
+  return dataRows_(sh, PRAISE_HEADERS.length).map((r, i) => ({
     row: i + 2,
     ts: r[0] instanceof Date ? Utilities.formatDate(r[0], TZ, 'yyyy-MM-dd HH:mm') : String(r[0]),
     date: toDateStr_(r[1]),
@@ -856,9 +899,8 @@ const SPY_REWARD = 3;
 // ---------- 읽기 ----------
 
 function readSpies_() {
-  const sh = ss_().getSheetByName(SHEETS.SPY);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, SPY_HEADERS.length).getValues().map((r, i) => ({
+  const sh = sheetByName_(SHEETS.SPY);
+  return dataRows_(sh, SPY_HEADERS.length).map((r, i) => ({
     row: i + 2,
     week: String(r[0]).trim(),
     no: String(r[1]).trim(),
@@ -869,9 +911,8 @@ function readSpies_() {
 }
 
 function readJudges_() {
-  const sh = ss_().getSheetByName(SHEETS.SPY_JUDGE);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, SPY_JUDGE_HEADERS.length).getValues().map((r) => ({
+  const sh = sheetByName_(SHEETS.SPY_JUDGE);
+  return dataRows_(sh, SPY_JUDGE_HEADERS.length).map((r) => ({
     date: toDateStr_(r[0]),
     spy: String(r[1]).trim(),
     good: [r[2], r[3], r[4]].map((x) => String(x).trim()).filter(Boolean),
@@ -880,9 +921,8 @@ function readJudges_() {
 }
 
 function readAccuses_() {
-  const sh = ss_().getSheetByName(SHEETS.ACCUSE);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, ACCUSE_HEADERS.length).getValues().map((r) => ({
+  const sh = sheetByName_(SHEETS.ACCUSE);
+  return dataRows_(sh, ACCUSE_HEADERS.length).map((r) => ({
     ts: r[0] instanceof Date ? Utilities.formatDate(r[0], TZ, 'yyyy-MM-dd HH:mm') : String(r[0]),
     from: String(r[1]).trim(),
     to: String(r[2]).trim(),
@@ -914,13 +954,16 @@ function campaignWeeks_() {
 
 /** 투투 화면용 요약 (데이터 버전으로 캐시) */
 function getSpyData_() {
-  const key = `spy_${dataVersion_()}`;
+  const ver = dataVersion_();
   const cache = CacheService.getScriptCache();
-  const hit = cache.get(key);
+  const hit = cache.get(`spy_${ver}`);
   if (hit) return JSON.parse(hit);
+  const sv = staleVersion_('spy');
+  const stale = sv && cache.get(`spy_${sv}`);
+  if (stale) return JSON.parse(stale);
   ensureSchema_();
   const data = { spies: readSpies_(), judgedDates: readJudges_().map((j) => j.date), accuses: readAccuses_() };
-  cache.put(key, JSON.stringify(data), CACHE_TTL_SEC);
+  cache.putAll({ [`spy_${ver}`]: JSON.stringify(data), [`last_spy_${todayStr_()}`]: JSON.stringify({ ver, at: Date.now() }) }, CACHE_TTL_SEC);
   return data;
 }
 
@@ -1113,10 +1156,9 @@ const DRAW_HEADERS = ['학생번호', '일퀘올클여부', '도장12개여부',
 
 /** 뽑기 시트의 완료 횟수 {번호: 횟수} */
 function readDrawDone_() {
-  const sh = ss_().getSheetByName(SHEETS.DRAW);
+  const sh = sheetByName_(SHEETS.DRAW);
   const out = {};
-  if (!sh || sh.getLastRow() < 2) return out;
-  sh.getRange(2, 1, sh.getLastRow() - 1, DRAW_HEADERS.length).getValues().forEach((r) => {
+  dataRows_(sh, DRAW_HEADERS.length).forEach((r) => {
     const no = String(r[0]).trim();
     if (no) out[no] = Number(r[4]) || 0;
   });
@@ -1607,9 +1649,15 @@ function studentLogin(no, code) {
   return { token: loginStudent_(no, code) };
 }
 
+/** 화면 열기·자동 갱신용. 다른 사람의 기록 때문에 매번 다시 계산하지 않도록 최근 결과(45초 이내)를 재사용 */
 function studentGetHome(token) {
   const me = requireStudent_(token);
-  return buildStudentHome_(me);
+  ALLOW_STALE_ = true;
+  try {
+    return buildStudentHome_(me);
+  } finally {
+    ALLOW_STALE_ = false;
+  }
 }
 
 /** 기록장 한 줄 → 투투에게 보이는 이름 (누가 줬는지는 숨김) */
@@ -1982,7 +2030,7 @@ function adminClearTestData(token, confirmText) {
   if (String(confirmText || '').trim() !== '테스트 기록 삭제') throw new Error('확인 문구가 맞지 않아요.');
   withLock_(() => {
     [SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.SPY, SHEETS.SPY_JUDGE, SHEETS.ACCUSE, SHEETS.DRAW].forEach((name) => {
-      const sh = ss_().getSheetByName(name);
+      const sh = sheetByName_(name);
       if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
     });
     clearAllCaches_();
@@ -3186,21 +3234,53 @@ const HTML_SOURCES = {
   }
 
   function apply(d) {
-    S.data = d;
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
-    render();
+    // 자동 갱신 결과가 지난번과 같으면 화면을 다시 그리지 않는다 (휴대폰 버벅임 방지)
+    const key = JSON.stringify(Object.assign({}, d, { serverTime: '', notice: '' }));
+    S.data = d;
+    if (key !== S.lastKey) { S.lastKey = key; render(); }
+    else $('stamp').textContent = \`마지막 갱신 \${d.serverTime} · 30초마다 자동 갱신\`;
     if (d.notice) toast(d.notice);
   }
 
-  /** 퀘스트 입력 동작: 서버가 갱신된 화면 데이터를 돌려준다 */
-  async function act(fn, ...args) {
-    if (S.acting) return false;
+  /**
+   * 퀘스트 입력 동작: 누른 순서대로 서버에 보내고(줄 세우기),
+   * 마지막 응답이 오면 그때 한 번 화면을 맞춘다. 중간에 받은 알림(도장 +1 등)은 모아서 보여 준다.
+   */
+  let actChain = Promise.resolve();
+  function act(fn, ...args) {
+    S.pending = (S.pending || 0) + 1;
     S.acting = true;
-    const my = ++S.seq;
-    try { const d = await call(fn, S.token, ...args); S.appliedSeq = my; apply(d); return true; }
-    catch (e) { toast(e.message, true); return false; }
-    finally { S.acting = false; }
+    S.appliedSeq = ++S.seq; // 이미 출발한 자동 갱신 응답은 버린다 (내 입력보다 오래된 데이터)
+    const job = actChain.then(async () => {
+      let ok = false;
+      try {
+        const d = await call(fn, S.token, ...args);
+        if (d.notice) S.notice = d.notice;
+        S.result = d;
+        ok = true;
+      } catch (e) {
+        toast(e.message, true);
+        S.failed = true;
+      } finally {
+        S.pending--;
+        if (!S.pending) {
+          S.acting = false;
+          if (S.result) {
+            const d = S.result;
+            d.notice = S.notice || d.notice;
+            S.result = null; S.notice = '';
+            S.lastKey = ''; // 방금 누른 결과는 항상 다시 그림
+            apply(d);
+          }
+          if (S.failed) { S.failed = false; S.lastKey = ''; refresh(true); } // 실패하면 서버 상태로 되돌림
+        }
+      }
+      return ok;
+    });
+    actChain = job.catch(() => {});
+    return job;
   }
 
   // ---------- 렌더 ----------
@@ -3525,6 +3605,9 @@ const HTML_SOURCES = {
     const b = e.target.closest('[data-doze]');
     if (!b || b.disabled) return;
     const val = b.classList.contains('on') ? '' : b.dataset.val; // 같은 버튼을 다시 누르면 선택 취소
+    // 누르자마자 색부터 바꾸고(서버 응답을 기다리지 않음), 저장은 뒤에서 순서대로
+    b.parentElement.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+    if (val) b.classList.add('on');
     act('questDoze', Number(b.dataset.doze), val);
   };
   $('inbox').onclick = (e) => { const b = e.target.closest('[data-thank]'); if (b && !b.disabled) act('praiseThank', b.dataset.thank); };
@@ -3542,7 +3625,7 @@ const HTML_SOURCES = {
 `,
   "Styles": `<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Jua&family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
   /* 포스터 톤: 검은 배경 + 은색 메탈 프레임 + 파란 네온 + 네이비 박스, 강조 노랑·하늘 */
   :root {

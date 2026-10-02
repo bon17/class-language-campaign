@@ -34,10 +34,7 @@ function withLock_(fn) {
 
 /** 학생 시트 전체(로그인 코드 포함). 서버 내부 전용 — 클라이언트로 그대로 내보내지 말 것. */
 function readStudents_() {
-  const sh = sheet_(SHEETS.STUDENTS);
-  const last = sh.getLastRow();
-  if (last < 2) return [];
-  return sh.getRange(2, 1, last - 1, STUDENT_HEADERS.length).getValues()
+  return dataRows_(sheet_(SHEETS.STUDENTS), STUDENT_HEADERS.length)
     .map((r, i) => ({
       row: i + 2,
       no: String(r[0]).trim(),
@@ -61,10 +58,7 @@ function getStudentsCached_() {
 // ---------- 기록장 읽기/쓰기 ----------
 
 function readLedger_() {
-  const sh = sheet_(SHEETS.LEDGER);
-  const last = sh.getLastRow();
-  if (last < 2) return [];
-  return sh.getRange(2, 1, last - 1, LEDGER_HEADERS.length).getValues().map((r, i) => ({
+  return dataRows_(sheet_(SHEETS.LEDGER), LEDGER_HEADERS.length).map((r, i) => ({
     row: i + 2,
     ts: r[LC['타임스탬프']] instanceof Date ? Utilities.formatDate(r[LC['타임스탬프']], TZ, 'yyyy-MM-dd HH:mm:ss') : String(r[LC['타임스탬프']]),
     date: toDateStr_(r[LC['날짜']]),
@@ -161,18 +155,43 @@ function invalidateStats_() {
   CacheService.getScriptCache().put('data_ver', String(Date.now()) + Math.floor(Math.random() * 1000), 21600);
 }
 
+/**
+ * 자동 갱신(30초 폴링)처럼 "조금 지난 데이터여도 되는" 요청에서 true로 둔다.
+ * 그러면 다른 사람이 방금 기록해 버전이 바뀌었어도, 45초 안에 만든 최신 계산 결과를 재사용한다.
+ * 본인이 버튼을 누른 요청은 false(기본) → 항상 새로 계산.
+ */
+let ALLOW_STALE_ = false;
+const STALE_MS = 45 * 1000;
+
+/** 정확한 버전이 없을 때 쓸 수 있는 최근 버전 (없으면 null) */
+function staleVersion_(kind) {
+  if (!ALLOW_STALE_) return null;
+  const hit = CacheService.getScriptCache().get(`last_${kind}_${todayStr_()}`);
+  if (!hit) return null;
+  const last = JSON.parse(hit);
+  return Date.now() - last.at < STALE_MS ? last.ver : null;
+}
+
 /** 캐시된 전체 통계 (로그인 코드·입력자 등 민감정보 없음). prev = 직전 등교일 기준 순위 */
 function getStats_() {
-  const key = `stats_${dataVersion_()}_${todayStr_()}`;
-  const hit = CacheService.getScriptCache().get(key);
-  return hit ? JSON.parse(hit) : buildDataBundle_().stats;
+  const cache = CacheService.getScriptCache();
+  const today = todayStr_();
+  const hit = cache.get(`stats_${dataVersion_()}_${today}`);
+  if (hit) return JSON.parse(hit);
+  const sv = staleVersion_('bundle');
+  const stale = sv && cache.get(`stats_${sv}_${today}`);
+  return stale ? JSON.parse(stale) : buildDataBundle_().stats;
 }
 
 /** 투투 한 명의 기록 요약 (캐시) */
 function getStudentHistory_(no) {
-  const key = `hist_${dataVersion_()}_${todayStr_()}_${no}`;
-  const hit = CacheService.getScriptCache().get(key);
+  const cache = CacheService.getScriptCache();
+  const today = todayStr_();
+  const hit = cache.get(`hist_${dataVersion_()}_${today}_${no}`);
   if (hit) return JSON.parse(hit);
+  const sv = staleVersion_('bundle');
+  const stale = sv && cache.get(`hist_${sv}_${today}_${no}`);
+  if (stale) return JSON.parse(stale);
   return buildDataBundle_().hist[no] || { records: [], questDates: [], praiseTo: {}, praiseHidden: {}, praisedNos: [], inbox: [], quest: null, drawDone: 0 };
 }
 
@@ -234,6 +253,7 @@ function buildDataBundle_() {
   const put = {};
   put[`stats_${ver}_${today}`] = JSON.stringify(stats);
   Object.keys(hist).forEach((no) => (put[`hist_${ver}_${today}_${no}`] = JSON.stringify(hist[no])));
+  put[`last_bundle_${today}`] = JSON.stringify({ ver, at: Date.now() });
   try {
     CacheService.getScriptCache().putAll(put, CACHE_TTL_SEC);
   } catch (e) {

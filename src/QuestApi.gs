@@ -13,9 +13,8 @@ const bool_ = (v) => v === true || String(v).toUpperCase() === 'TRUE';
 // ---------- 시트 읽기/쓰기 ----------
 
 function readQuestRows_() {
-  const sh = ss_().getSheetByName(SHEETS.QUEST);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, QUEST_HEADERS.length).getValues().map((r, i) => ({
+  const sh = sheetByName_(SHEETS.QUEST);
+  return dataRows_(sh, QUEST_HEADERS.length).map((r, i) => ({
     row: i + 2,
     date: toDateStr_(r[0]),
     no: String(r[1]).trim(),
@@ -48,9 +47,8 @@ function writeQuestRow_(q) {
 }
 
 function readPraise_() {
-  const sh = ss_().getSheetByName(SHEETS.PRAISE);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, PRAISE_HEADERS.length).getValues().map((r, i) => ({
+  const sh = sheetByName_(SHEETS.PRAISE);
+  return dataRows_(sh, PRAISE_HEADERS.length).map((r, i) => ({
     row: i + 2,
     ts: r[0] instanceof Date ? Utilities.formatDate(r[0], TZ, 'yyyy-MM-dd HH:mm') : String(r[0]),
     date: toDateStr_(r[1]),

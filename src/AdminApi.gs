@@ -85,7 +85,7 @@ function adminClearTestData(token, confirmText) {
   if (String(confirmText || '').trim() !== '테스트 기록 삭제') throw new Error('확인 문구가 맞지 않아요.');
   withLock_(() => {
     [SHEETS.LEDGER, SHEETS.QUEST, SHEETS.PRAISE, SHEETS.SPY, SHEETS.SPY_JUDGE, SHEETS.ACCUSE, SHEETS.DRAW].forEach((name) => {
-      const sh = ss_().getSheetByName(name);
+      const sh = sheetByName_(name);
       if (sh && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
     });
     clearAllCaches_();

@@ -390,21 +390,53 @@
   }
 
   function apply(d) {
-    S.data = d;
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
-    render();
+    // 자동 갱신 결과가 지난번과 같으면 화면을 다시 그리지 않는다 (휴대폰 버벅임 방지)
+    const key = JSON.stringify(Object.assign({}, d, { serverTime: '', notice: '' }));
+    S.data = d;
+    if (key !== S.lastKey) { S.lastKey = key; render(); }
+    else $('stamp').textContent = `마지막 갱신 ${d.serverTime} · 30초마다 자동 갱신`;
     if (d.notice) toast(d.notice);
   }
 
-  /** 퀘스트 입력 동작: 서버가 갱신된 화면 데이터를 돌려준다 */
-  async function act(fn, ...args) {
-    if (S.acting) return false;
+  /**
+   * 퀘스트 입력 동작: 누른 순서대로 서버에 보내고(줄 세우기),
+   * 마지막 응답이 오면 그때 한 번 화면을 맞춘다. 중간에 받은 알림(도장 +1 등)은 모아서 보여 준다.
+   */
+  let actChain = Promise.resolve();
+  function act(fn, ...args) {
+    S.pending = (S.pending || 0) + 1;
     S.acting = true;
-    const my = ++S.seq;
-    try { const d = await call(fn, S.token, ...args); S.appliedSeq = my; apply(d); return true; }
-    catch (e) { toast(e.message, true); return false; }
-    finally { S.acting = false; }
+    S.appliedSeq = ++S.seq; // 이미 출발한 자동 갱신 응답은 버린다 (내 입력보다 오래된 데이터)
+    const job = actChain.then(async () => {
+      let ok = false;
+      try {
+        const d = await call(fn, S.token, ...args);
+        if (d.notice) S.notice = d.notice;
+        S.result = d;
+        ok = true;
+      } catch (e) {
+        toast(e.message, true);
+        S.failed = true;
+      } finally {
+        S.pending--;
+        if (!S.pending) {
+          S.acting = false;
+          if (S.result) {
+            const d = S.result;
+            d.notice = S.notice || d.notice;
+            S.result = null; S.notice = '';
+            S.lastKey = ''; // 방금 누른 결과는 항상 다시 그림
+            apply(d);
+          }
+          if (S.failed) { S.failed = false; S.lastKey = ''; refresh(true); } // 실패하면 서버 상태로 되돌림
+        }
+      }
+      return ok;
+    });
+    actChain = job.catch(() => {});
+    return job;
   }
 
   // ---------- 렌더 ----------
@@ -729,6 +761,9 @@
     const b = e.target.closest('[data-doze]');
     if (!b || b.disabled) return;
     const val = b.classList.contains('on') ? '' : b.dataset.val; // 같은 버튼을 다시 누르면 선택 취소
+    // 누르자마자 색부터 바꾸고(서버 응답을 기다리지 않음), 저장은 뒤에서 순서대로
+    b.parentElement.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
+    if (val) b.classList.add('on');
     act('questDoze', Number(b.dataset.doze), val);
   };
   $('inbox').onclick = (e) => { const b = e.target.closest('[data-thank]'); if (b && !b.disabled) act('praiseThank', b.dataset.thank); };

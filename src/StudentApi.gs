@@ -16,9 +16,15 @@ function studentLogin(no, code) {
   return { token: loginStudent_(no, code) };
 }
 
+/** 화면 열기·자동 갱신용. 다른 사람의 기록 때문에 매번 다시 계산하지 않도록 최근 결과(45초 이내)를 재사용 */
 function studentGetHome(token) {
   const me = requireStudent_(token);
-  return buildStudentHome_(me);
+  ALLOW_STALE_ = true;
+  try {
+    return buildStudentHome_(me);
+  } finally {
+    ALLOW_STALE_ = false;
+  }
 }
 
 /** 기록장 한 줄 → 투투에게 보이는 이름 (누가 줬는지는 숨김) */

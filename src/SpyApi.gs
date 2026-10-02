@@ -17,9 +17,8 @@ const SPY_REWARD = 3;
 // ---------- 읽기 ----------
 
 function readSpies_() {
-  const sh = ss_().getSheetByName(SHEETS.SPY);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, SPY_HEADERS.length).getValues().map((r, i) => ({
+  const sh = sheetByName_(SHEETS.SPY);
+  return dataRows_(sh, SPY_HEADERS.length).map((r, i) => ({
     row: i + 2,
     week: String(r[0]).trim(),
     no: String(r[1]).trim(),
@@ -30,9 +29,8 @@ function readSpies_() {
 }
 
 function readJudges_() {
-  const sh = ss_().getSheetByName(SHEETS.SPY_JUDGE);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, SPY_JUDGE_HEADERS.length).getValues().map((r) => ({
+  const sh = sheetByName_(SHEETS.SPY_JUDGE);
+  return dataRows_(sh, SPY_JUDGE_HEADERS.length).map((r) => ({
     date: toDateStr_(r[0]),
     spy: String(r[1]).trim(),
     good: [r[2], r[3], r[4]].map((x) => String(x).trim()).filter(Boolean),
@@ -41,9 +39,8 @@ function readJudges_() {
 }
 
 function readAccuses_() {
-  const sh = ss_().getSheetByName(SHEETS.ACCUSE);
-  if (!sh || sh.getLastRow() < 2) return [];
-  return sh.getRange(2, 1, sh.getLastRow() - 1, ACCUSE_HEADERS.length).getValues().map((r) => ({
+  const sh = sheetByName_(SHEETS.ACCUSE);
+  return dataRows_(sh, ACCUSE_HEADERS.length).map((r) => ({
     ts: r[0] instanceof Date ? Utilities.formatDate(r[0], TZ, 'yyyy-MM-dd HH:mm') : String(r[0]),
     from: String(r[1]).trim(),
     to: String(r[2]).trim(),
@@ -75,13 +72,16 @@ function campaignWeeks_() {
 
 /** 투투 화면용 요약 (데이터 버전으로 캐시) */
 function getSpyData_() {
-  const key = `spy_${dataVersion_()}`;
+  const ver = dataVersion_();
   const cache = CacheService.getScriptCache();
-  const hit = cache.get(key);
+  const hit = cache.get(`spy_${ver}`);
   if (hit) return JSON.parse(hit);
+  const sv = staleVersion_('spy');
+  const stale = sv && cache.get(`spy_${sv}`);
+  if (stale) return JSON.parse(stale);
   ensureSchema_();
   const data = { spies: readSpies_(), judgedDates: readJudges_().map((j) => j.date), accuses: readAccuses_() };
-  cache.put(key, JSON.stringify(data), CACHE_TTL_SEC);
+  cache.putAll({ [`spy_${ver}`]: JSON.stringify(data), [`last_spy_${todayStr_()}`]: JSON.stringify({ ver, at: Date.now() }) }, CACHE_TTL_SEC);
   return data;
 }
 

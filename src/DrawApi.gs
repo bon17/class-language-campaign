@@ -10,10 +10,9 @@ const DRAW_HEADERS = ['학생번호', '일퀘올클여부', '도장12개여부',
 
 /** 뽑기 시트의 완료 횟수 {번호: 횟수} */
 function readDrawDone_() {
-  const sh = ss_().getSheetByName(SHEETS.DRAW);
+  const sh = sheetByName_(SHEETS.DRAW);
   const out = {};
-  if (!sh || sh.getLastRow() < 2) return out;
-  sh.getRange(2, 1, sh.getLastRow() - 1, DRAW_HEADERS.length).getValues().forEach((r) => {
+  dataRows_(sh, DRAW_HEADERS.length).forEach((r) => {
     const no = String(r[0]).trim();
     if (no) out[no] = Number(r[4]) || 0;
   });

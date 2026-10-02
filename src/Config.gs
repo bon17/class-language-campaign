@@ -52,14 +52,40 @@ const CONFIG_DEFS = [
 
 const CACHE_KEYS = { CONFIG: 'config_v1', STUDENTS: 'students_v1', TIMETABLE: 'timetable_v1' };
 
-/** 스프레드시트 핸들. 초기 세팅 때 ID를 저장해 두면 웹앱에서도 확실히 같은 파일을 연다. */
+/**
+ * 스프레드시트 핸들. 초기 세팅 때 ID를 저장해 두면 웹앱에서도 확실히 같은 파일을 연다.
+ * 파일 열기는 느리므로 한 번의 실행(요청) 안에서는 한 번만 열고 재사용한다.
+ */
+let SS_MEMO_ = null;
+const SHEET_MEMO_ = {};
+
 function ss_() {
+  if (SS_MEMO_) return SS_MEMO_;
   const id = PropertiesService.getScriptProperties().getProperty('SS_ID');
-  return id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActive();
+  SS_MEMO_ = id ? SpreadsheetApp.openById(id) : SpreadsheetApp.getActive();
+  return SS_MEMO_;
+}
+
+/** 시트 찾기 (없으면 null). 찾은 시트는 실행 동안 기억한다. */
+function sheetByName_(name) {
+  if (SHEET_MEMO_[name]) return SHEET_MEMO_[name];
+  const sh = ss_().getSheetByName(name);
+  if (sh) SHEET_MEMO_[name] = sh;
+  return sh;
+}
+
+/** 머리글을 뺀 데이터 행을 한 번의 요청으로 읽는다 (행 i → 시트 i+2행). 열 수는 ncols로 맞춘다. */
+function dataRows_(sh, ncols) {
+  if (!sh) return [];
+  return sh.getDataRange().getValues().slice(1).map((r) => {
+    const row = r.slice(0, ncols);
+    while (row.length < ncols) row.push('');
+    return row;
+  });
 }
 
 function sheet_(name) {
-  const sh = ss_().getSheetByName(name);
+  const sh = sheetByName_(name);
   if (!sh) throw new Error(`"${name}" 시트가 없어요. 메뉴에서 [시트 초기 세팅]을 먼저 실행해 주세요.`);
   return sh;
 }
@@ -75,9 +101,9 @@ function getConfig() {
 
 function readConfigFromSheet_() {
   const raw = {};
-  const sh = ss_().getSheetByName(SHEETS.CONFIG);
-  if (sh && sh.getLastRow() > 1) {
-    sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues().forEach((r) => {
+  const sh = sheetByName_(SHEETS.CONFIG);
+  if (sh) {
+    dataRows_(sh, 2).forEach((r) => {
       const label = String(r[0]).trim();
       if (label) raw[label] = r[1];
     });
@@ -141,10 +167,9 @@ function setConfigValue_(key, value) {
 
 /** "교과선생님" 시트: 과목 | 선생님 이름 (이름이 빈 줄은 건너뜀) */
 function readTeacherSheet_() {
-  const sh = ss_().getSheetByName(SHEETS.TEACHERS);
-  if (!sh || sh.getLastRow() < 2) return [];
+  const sh = sheetByName_(SHEETS.TEACHERS);
   const seen = {};
-  return sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues()
+  return dataRows_(sh, 2)
     .map((r) => ({ subject: String(r[0]).trim(), name: String(r[1]).trim() }))
     .filter((t) => t.name && !seen[t.name] && (seen[t.name] = true));
 }

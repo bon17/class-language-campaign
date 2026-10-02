@@ -24,18 +24,18 @@ function getTimetable_() {
   const hit = cache.get(CACHE_KEYS.TIMETABLE);
   if (hit) return JSON.parse(hit);
   const tt = { periods: [], week: { 1: [], 2: [], 3: [], 4: [], 5: [] }, overrides: {} };
-  const sh = ss_().getSheetByName(SHEETS.TIMETABLE);
-  if (sh && sh.getLastRow() > 1) {
-    sh.getRange(2, 1, sh.getLastRow() - 1, TIMETABLE_HEADERS.length).getValues().forEach((r) => {
+  const sh = sheetByName_(SHEETS.TIMETABLE);
+  if (sh) {
+    dataRows_(sh, TIMETABLE_HEADERS.length).forEach((r) => {
       const p = parseInt(r[0], 10);
       if (!p) return;
       tt.periods.push({ period: p, start: toTimeStr_(r[1]) });
       for (let w = 1; w <= 5; w++) tt.week[w][p] = String(r[w + 1]).trim();
     });
   }
-  const ov = ss_().getSheetByName(SHEETS.TT_OVERRIDE);
-  if (ov && ov.getLastRow() > 1) {
-    ov.getRange(2, 1, ov.getLastRow() - 1, TT_OVERRIDE_HEADERS.length).getValues().forEach((r) => {
+  const ov = sheetByName_(SHEETS.TT_OVERRIDE);
+  if (ov) {
+    dataRows_(ov, TT_OVERRIDE_HEADERS.length).forEach((r) => {
       const d = toDateStr_(r[0]);
       if (!d) return;
       const subjects = {};
