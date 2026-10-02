@@ -146,6 +146,7 @@ function buildStudentHome_(me) {
     },
     rewards: cfg.rewards,
     rankPublicCount: cfg.rankPublicCount,
+    rules: { praiseMinLength: cfg.praiseMinLength, dozeAllowed: cfg.dozeAllowed, excluded: cfg.excludedSubjects || [] },
     classSigns: hist.records
       .filter((r) => r.mission === '수업참여' || r.mission === 'MVP')
       .map((r) => ({ date: r.date, period: r.period, subject: r.subject, mvp: r.mission === 'MVP', score: r.score })),

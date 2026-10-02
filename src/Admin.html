@@ -96,6 +96,11 @@
       <h3>지정 기록</h3>
       <div class="table-wrap"><table id="spyHist"></table></div>
       <h3>판정 기록</h3>
+      <div class="row" style="margin-bottom:8px">
+        <div class="grow" id="settleState"></div>
+        <button class="btn yellow" id="settleBtn" style="flex:0 0 auto">💰 정산하기</button>
+      </div>
+      <p class="muted" style="margin-top:0">판정 도장(+5~−5)과 암행어사 활동 보상(+3)은 정산할 때 한꺼번에 들어가요. 다른 투투가 도장판 변화로 암행어사를 눈치채지 못하게 하기 위해서예요.</p>
       <div class="table-wrap"><table id="spyJudges"></table></div>
       <h3>지목 기록 <span class="muted" id="accCount" style="font-size:13px"></span></h3>
       <div class="table-wrap"><table id="spyAcc"></table></div>
@@ -309,7 +314,7 @@
       ['랭킹', c.rankLocked ? '🔒 잠금' : '🔓 공개'],
     ];
     $('cards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v" style="font-size:18px">${esc(v)}</div></div>`).join('');
-    $('warnings').innerHTML = (d.cfg.testMode ? '<div class="warn">🧪 테스트 모드가 켜져 있어요. 테스트가 끝나면 ⚙️ 설정 탭에서 끄고 테스트 기록을 지워 주세요.</div>' : '') + (d.spy.needAppoint ? `<div class="warn">🚨 ${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>` : '') +
+    $('warnings').innerHTML = (d.spy.pendingCount ? `<div class="warn">💰 암행어사 판정 정산 대기 ${d.spy.pendingCount}건 (🕵️ 암행어사 탭에서 정산)</div>` : '') + (d.cfg.testMode ? '<div class="warn">🧪 테스트 모드가 켜져 있어요. 테스트가 끝나면 ⚙️ 설정 탭에서 끄고 테스트 기록을 지워 주세요.</div>' : '') + (d.spy.needAppoint ? `<div class="warn">🚨 ${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>` : '') +
       d.warnings.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join('');
 
     $('sortBtn').textContent = S.sort === 'rank' ? '순위순 ▾' : '번호순 ▾';
@@ -392,8 +397,13 @@
       (sp.history.map((h) => `<tr><td>${esc(h.week)}</td><td class="left">${esc(h.name)}</td><td>${esc(h.start.slice(5))}~${esc(h.end.slice(5))}</td>
         <td class="${h.status === '검거됨' ? 'minus' : h.status === '활동중' ? 'plus' : 'muted'}">${esc(h.status)}</td>
         <td>${h.status === '활동중' ? `<button class="btn sm danger" data-dismiss="${h.row}">해임</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
-    $('spyJudges').innerHTML = '<tr><th>날짜</th><th class="left">암행어사</th><th class="left">😊 바른 1·2·3위</th><th class="left">🤬 나쁜 1·2·3위</th></tr>' +
-      (sp.judges.map((j) => `<tr><td>${esc(j.date.slice(5))}</td><td class="left">${esc(j.spy)}</td><td class="left plus">${j.good.map(esc).join(', ')}</td><td class="left minus">${j.bad.map(esc).join(', ') || '-'}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">아직 없어요.</td></tr>');
+    $('settleState').innerHTML = sp.pendingCount
+      ? `정산 대기 <b class="yellow">${sp.pendingCount}건</b>`
+      : '<span class="muted">정산 대기 없음</span>';
+    $('settleBtn').disabled = !sp.pendingCount;
+    $('spyJudges').innerHTML = '<tr><th>날짜</th><th class="left">암행어사</th><th class="left">😊 바른 1·2·3위</th><th class="left">🤬 나쁜 1·2·3위</th><th>정산</th></tr>' +
+      (sp.judges.map((j) => `<tr><td>${esc(j.date.slice(5))}</td><td class="left">${esc(j.spy)}</td><td class="left plus">${j.good.map(esc).join(', ')}</td><td class="left minus">${j.bad.map(esc).join(', ') || '-'}</td>
+        <td class="${j.settled ? 'plus' : 'yellow'}">${j.settled ? '완료' : '대기'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
     $('accCount').textContent = `(${sp.accusedCount}/${d.students.length}명 사용)`;
     $('spyAcc').innerHTML = '<tr><th>시각</th><th class="left">지목한</th><th class="left">지목된</th><th>결과</th><th>이동</th></tr>' +
       (sp.accuses.map((a) => `<tr><td>${esc(String(a.ts).slice(5, 16))}</td><td class="left">${esc(a.from)}</td><td class="left">${esc(a.to)}</td>
@@ -589,6 +599,12 @@
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
   $('spyBtn').onclick = appointSpy;
+  $('settleBtn').onclick = async () => {
+    const n = S.data.spy.pendingCount;
+    const ok = await modal({ title: '암행어사 판정 정산', html: `<p>정산 대기 중인 판정 <b class="yellow">${n}건</b>의 도장(판정 +/−, 활동 보상 +3)을 기록장에 넣어요.</p><p class="muted">판정한 날짜로 기록되고, 투투 화면에는 "암행어사 판정 +5"처럼만 보여요.</p>`, okText: '정산하기' });
+    if (!ok) return;
+    try { const d = await call('adminSettleSpy', S.token); setData(d); toast(d.notice || '정산했어요.'); } catch (e) { toast(e.message, true); }
+  };
   $('drawOnly').addEventListener('change', renderReward);
   $('drawTable').onclick = (e) => { const b = e.target.closest('[data-draw]'); if (b && !b.disabled) setDrawDone(b.dataset.draw, Number(b.dataset.n)); };
   $('spyHist').onclick = (e) => { const b = e.target.closest('[data-dismiss]'); if (b) dismissSpy(Number(b.dataset.dismiss)); };

@@ -156,6 +156,10 @@
     .jump a:active { background: var(--sky); color: #04203d; }
     .box, .space { scroll-margin-top: 60px; }
 
+    .rule-list { margin: 6px 0 10px; padding-left: 20px; }
+    .rule-list li { margin: 6px 0; line-height: 1.55; }
+    #rules details { border-bottom: 1px solid #ffffff14; padding: 4px 0; }
+
     .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .topbar .hi { flex: 1; font-weight: 700; }
     .topbar .hi b { color: var(--yellow); }
@@ -185,6 +189,7 @@
   <section id="app" class="hidden">
     <div class="topbar">
       <div class="hi" id="hi"></div>
+      <button class="btn sm ghost hidden" id="spyToggle" aria-label="비밀 메뉴">🔒</button>
       <button class="btn sm ghost" id="refreshBtn">새로고침</button>
       <button class="btn sm danger" id="logoutBtn">나가기</button>
     </div>
@@ -192,7 +197,7 @@
     <!-- 바로가기 -->
     <nav class="jump" id="jump">
       <a data-to="rankBox">🏆 랭킹</a><a data-to="questBox">⭐ 퀘스트</a><a data-to="boardSec">🌍 도장판</a>
-      <a data-to="inboxSec">💌 칭찬함</a><a data-to="accuseBox">🔍 지목</a><a data-to="rewardSec">🎁 보상</a>
+      <a data-to="inboxSec">💌 칭찬함</a><a data-to="accuseBox">🔍 지목</a><a data-to="rulesSec">📖 규칙</a><a data-to="rewardSec">🎁 보상</a>
     </nav>
 
     <!-- 랭킹 -->
@@ -298,6 +303,12 @@
       <h2 class="bubble-title" id="signTitle"></h2>
       <div class="space-sub" style="margin:6px 0 10px">수업 적극 참여 +2 · 수업 MVP +3</div>
       <div class="signs" id="signs"></div>
+    </div>
+
+    <!-- 도장 얻는 규칙 -->
+    <div class="box" id="rulesSec">
+      <h2 class="title-font">📖 도장 얻는 규칙</h2>
+      <div id="rules"></div>
     </div>
 
     <!-- 보상 안내 -->
@@ -455,6 +466,7 @@
     renderInbox(d);
     renderSpy(d);
     renderRewardGuide(d);
+    renderRules(d);
     $('stamp').textContent = `마지막 갱신 ${d.serverTime} · 30초마다 자동 갱신`;
   }
 
@@ -635,12 +647,18 @@
   function renderSpy(d) {
     // 암행어사 임무
     const m = d.spy.mission;
-    $('spyBox').classList.toggle('hidden', !m);
-    if (m && !$('spyBox').contains(document.activeElement)) {
-      const head = `<h2 class="title-font">🕵️ 암행어사 임무 <span class="secret">나만 보여요 · 비밀!</span></h2>
-        <p class="muted" style="margin:0">임기: ${md(m.start)} ~ ${md(m.end)} · 친구들에게 정체를 들키지 않게 조심!</p>`;
+    // 평소에는 닫아 두고, 위쪽 작은 🔒 버튼으로만 연다 (친구가 화면을 봐도 눈에 띄지 않게)
+    $('spyToggle').classList.toggle('hidden', !m);
+    if (!m) S.spyOpen = false;
+    $('spyBox').classList.toggle('hidden', !m || !S.spyOpen);
+    $('spyToggle').textContent = S.spyOpen ? '🔓' : '🔒';
+    if (m && S.spyOpen && !$('spyBox').contains(document.activeElement)) {
+      const head = `<div class="row"><h2 class="title-font grow" style="margin:0">🕵️ 암행어사 임무 <span class="secret">나만 보여요 · 비밀!</span></h2>
+          <button class="btn sm ghost" style="flex:0 0 auto" id="spyClose">닫기 🔒</button></div>
+        <p class="muted" style="margin:6px 0 0">임기: ${md(m.start)} ~ ${md(m.end)} · 친구들에게 정체를 들키지 않게 조심!</p>
+        <p class="muted" style="margin:4px 0 0">판정 도장과 활동 보상은 담임 선생님이 <b>정산</b>할 때 한꺼번에 들어가요.${m.pendingReward ? ` (정산 대기 중인 내 활동 보상 <b class="yellow">+${m.pendingReward}</b>)` : ''}</p>`;
       if (!m.isSchoolDay) $('spyBox').innerHTML = head + '<p>오늘은 등교일이 아니라 판정이 없어요.</p>';
-      else if (m.judgedToday) $('spyBox').innerHTML = head + `<div class="stamp-done">✅ 오늘 판정 완료! (활동 보상 +${m.reward})</div>`;
+      else if (m.judgedToday) $('spyBox').innerHTML = head + `<div class="stamp-done">✅ 오늘 판정 완료!</div>`;
       else {
         const rows = (kind, label, scores) => [0, 1, 2].map((i) => `<div class="jrow"><span class="rk ${kind}">${label} ${i + 1}위 <small>(${scores[i]})</small></span>
           <select data-j="${kind}${i}">${options(d.friends, S.judge[kind + i] || '', kind === 'good' ? '친구 선택 (필수)' : '없음')}</select></div>`).join('');
@@ -693,7 +711,7 @@
     if (new Set(all).size !== all.length) return toast('한 친구를 두 번 고를 수 없어요.', true);
     const nm = (no) => (S.data.friends.find((f) => f.no === no) || {}).name || no;
     const ok = await confirmBox('오늘 판정 제출', `<p>😊 ${good.map(nm).map(esc).join(', ')}</p><p>🤬 ${bad.length ? bad.map(nm).map(esc).join(', ') : '없음'}</p><p class="muted">제출하면 바꿀 수 없어요.</p>`, '제출');
-    if (ok && (await act('spyJudge', good, bad))) S.judge = {};
+    if (ok && (await act('spyJudge', good, bad))) { S.judge = {}; S.spyOpen = false; S.lastKey = ''; render(); }
   }
 
   async function submitAccuse() {
@@ -702,6 +720,33 @@
     const name = (S.data.friends.find((f) => f.no === no) || {}).name || '';
     const ok = await confirmBox('정말 지목할까요?', `<p style="font-size:20px;text-align:center"><b class="yellow">${esc(name)}</b></p><p>지목 기회는 <b>기간 중 1번</b>뿐이에요. 되돌릴 수 없어요!</p>`, '지목하기');
     if (ok) act('accuseSpy', no);
+  }
+
+  function renderRules(d) {
+    const r = d.rules || {};
+    const li = (t) => `<li>${t}</li>`;
+    $('rules').innerHTML = `
+      <details open><summary>⭐ 미션1. 일일퀘스트 깨기! <span class="yellow">하루 최대 +1</span></summary><ul class="rule-list">
+        ${li(`💌 <b>친구에게 칭찬 1회</b>: 친구를 골라 칭찬 문장을 써요 (${r.praiseMinLength}자 이상). 하루 1번, 한 번 칭찬한 친구는 다시 고를 수 없어요.`)}
+        ${li('🚫 비난·비판·놀림이 담긴 칭찬이나 <b>구체적이지 않은 칭찬</b>은 담임 선생님이 숨기고 칭찬 미션도 취소돼요.')}
+        ${li('🙇 <b>복도에서 선생님께 인사 2회</b>: 인사한 <b>서로 다른 선생님 2분</b>을 기록해요.')}
+        ${li(`😴 <b>수업 시간에 졸지 않기</b>: 하교 후 교시마다 체크해요. 😴가 <b>${r.dozeAllowed}개 이하</b>면 성공!${r.excluded && r.excluded.length ? ` (${r.excluded.map(esc).join(', ')} 시간은 제외)` : ''}`)}
+        ${li('✅ 3가지를 모두 완료하면 <b class="yellow">도장 +1</b>. 오늘 날짜만 입력할 수 있고, 양심에 따라 체크해요!')}
+      </ul></details>
+      <details><summary>🕵️ 미션2. 욕설 암행어사를 찾아라!</summary><ul class="rule-list">
+        ${li('비밀 암행어사(임기 1주)가 매일 우리 반 언어를 관찰해요.')}
+        ${li('바른 언어 1·2·3위 <b class="plus">+5 / +3 / +1</b>, 나쁜 언어 1·2·3위 <b class="minus">−5 / −3 / −1</b>')}
+        ${li('판정 도장은 담임 선생님이 <b>정산</b>할 때 한꺼번에 들어와요.')}
+        ${li('🔍 기간 중 <b>딱 1번</b> 암행어사를 지목할 수 있어요. 맞히면 암행어사가 받은 활동 보상 도장을 <b>모두</b> 가져와요! 틀려도 벌점은 없어요.')}
+      </ul></details>
+      <details><summary>📒 미션3. 수업 듣고 도장 얻자!</summary><ul class="rule-list">
+        ${li('수업 시간에 적극 참여(좋은 질문·발표)하거나 선생님께 칭찬받으면 <b class="plus">+2</b> (한 교시에 1번)')}
+        ${li('수업 MVP로 뽑히면 <b class="plus">+3</b> (교시마다 1명)')}
+        ${li('단체 도장판에 싸인을 받으면 반 전체 <b class="plus">+3</b>')}
+      </ul></details>
+      <details><summary>🎁 보상</summary><ul class="rule-list">
+        ${li(`랭킹 1~5위 보상 + 일퀘 모두 클리어 또는 도장 ${d.draw.threshold}개 이상이면 쿠폰 뽑기 (아래 보상 안내 참고)`)}
+      </ul></details>`;
   }
 
   function renderRewardGuide(d) {
@@ -734,6 +779,11 @@
   $('loginBtn').onclick = login;
   $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
   $('refreshBtn').onclick = () => refresh(false);
+  $('spyToggle').onclick = () => {
+    S.spyOpen = !S.spyOpen; S.lastKey = ''; render();
+    if (S.spyOpen) $('spyBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  $('spyBox').addEventListener('click', (e) => { if (e.target.id === 'spyClose') { S.spyOpen = false; S.lastKey = ''; render(); } });
   $('jump').onclick = (e) => { const a = e.target.closest('[data-to]'); if (a) $(a.dataset.to).scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('friendChips').onclick = (e) => {
     const b = e.target.closest('[data-friend]');

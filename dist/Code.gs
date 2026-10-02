@@ -884,13 +884,16 @@ function withNotice_(home, stamped, msg) {
  * 미션2: 욕설 암행어사를 찾아라!
  * - 담임이 비밀리에 암행어사 지정(임기 1주). 정체는 본인 화면에만 내려보낸다.
  * - 암행어사 일일 판정(하루 1회): 바른 1·2·3위 +5/+3/+1, 나쁜 1·2·3위 −5/−3/−1, 제출 시 활동 보상 +3
+ *   → 바로 기록장에 넣지 않고 '정산 대기'. 담임이 [정산하기]를 누르면 그때 한꺼번에 도장이 들어간다
+ *     (다른 투투가 도장판 변화를 보고 암행어사를 눈치채지 못하게)
  * - 지목(기간 중 1회): 현 암행어사를 맞히면 그 암행어사가 "암행어사 활동 보상"으로 받은 도장 전부를 가져온다
  *   (기록장에 −/+ 두 줄), 암행어사는 즉시 직위 상실 → 담임에게 "새 암행어사 지정 필요"
  * - 실패하면 기회만 소진. 결과는 본인에게만 (설정 "지목 결과 공개" ON이면 검거 소식 공개)
  */
 
 const SPY_HEADERS = ['주차', '학생번호', '시작일', '종료일', '상태', '변경시각'];
-const SPY_JUDGE_HEADERS = ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위', '타임스탬프'];
+const SPY_JUDGE_HEADERS = ['날짜', '암행어사번호', '바른1위', '바른2위', '바른3위', '나쁜1위', '나쁜2위', '나쁜3위', '타임스탬프', '정산여부', '정산시각', '활동보상처리'];
+const JC = { SETTLED: 10, SETTLED_AT: 11, REWARD: 12 }; // 1부터 센 열 번호
 const ACCUSE_HEADERS = ['타임스탬프', '지목한번호', '지목된번호', '결과', '날짜', '이전도장수'];
 const GOOD_SCORES = [5, 3, 1];
 const BAD_SCORES = [-5, -3, -1];
@@ -912,11 +915,14 @@ function readSpies_() {
 
 function readJudges_() {
   const sh = sheetByName_(SHEETS.SPY_JUDGE);
-  return dataRows_(sh, SPY_JUDGE_HEADERS.length).map((r) => ({
+  return dataRows_(sh, SPY_JUDGE_HEADERS.length).map((r, i) => ({
+    row: i + 2,
     date: toDateStr_(r[0]),
     spy: String(r[1]).trim(),
     good: [r[2], r[3], r[4]].map((x) => String(x).trim()).filter(Boolean),
     bad: [r[5], r[6], r[7]].map((x) => String(x).trim()).filter(Boolean),
+    settled: bool_(r[JC.SETTLED - 1]),
+    reward: String(r[JC.REWARD - 1]).trim(), // '' 대기 / '지급' / '이전됨'(검거로 지목한 투투에게 이미 줌)
   })).filter((j) => j.date);
 }
 
@@ -962,7 +968,10 @@ function getSpyData_() {
   const stale = sv && cache.get(`spy_${sv}`);
   if (stale) return JSON.parse(stale);
   ensureSchema_();
-  const data = { spies: readSpies_(), judgedDates: readJudges_().map((j) => j.date), accuses: readAccuses_() };
+  const judges = readJudges_();
+  const pendingReward = {};
+  judges.forEach((j) => { if (!j.settled && j.reward !== '이전됨') pendingReward[j.spy] = (pendingReward[j.spy] || 0) + SPY_REWARD; });
+  const data = { spies: readSpies_(), judgedDates: judges.map((j) => j.date), accuses: readAccuses_(), pendingReward };
   cache.putAll({ [`spy_${ver}`]: JSON.stringify(data), [`last_spy_${todayStr_()}`]: JSON.stringify({ ver, at: Date.now() }) }, CACHE_TTL_SEC);
   return data;
 }
@@ -995,6 +1004,7 @@ function spyHomeFor_(me, today) {
       isSchoolDay: cfg.schoolDays.indexOf(today) >= 0,
       judgedToday: d.judgedDates.indexOf(today) >= 0,
       reward: SPY_REWARD,
+      pendingReward: (d.pendingReward || {})[me.no] || 0,
     };
   }
   return out;
@@ -1024,16 +1034,13 @@ function spyJudge(token, good, bad) {
     if (!active || active.no !== me.no) throw new Error('지금은 암행어사 임무를 할 수 없어요.');
     if (readJudges_().some((j) => j.date === today)) throw new Error('오늘 판정은 이미 제출했어요.');
     const sh = sheet_(SHEETS.SPY_JUDGE);
-    const row = [today, me.no, g[0], g[1], g[2], b[0] || '', b[1] || '', b[2] || '', new Date()];
+    // 도장은 아직 넣지 않는다 (정산 대기)
+    const row = [today, me.no, g[0], g[1], g[2], b[0] || '', b[1] || '', b[2] || '', new Date(), false, '', ''];
     sh.getRange(sh.getLastRow() + 1, 1, 1, SPY_JUDGE_HEADERS.length).setValues([row]);
-    const recs = [];
-    g.forEach((no, i) => recs.push({ date: today, no, mission: '암행어사판정', score: GOOD_SCORES[i], inputType: '암행어사', inputBy: me.no, memo: `바른 언어 ${i + 1}위` }));
-    b.forEach((no, i) => recs.push({ date: today, no, mission: '암행어사판정', score: BAD_SCORES[i], inputType: '암행어사', inputBy: me.no, memo: `나쁜 언어 ${i + 1}위` }));
-    recs.push({ date: today, no: me.no, mission: '암행어사활동', score: SPY_REWARD, inputType: '시스템', inputBy: '자동', memo: '판정 제출 보상' });
-    appendRecords_(recs);
+    invalidateStats_();
   });
   const home = buildStudentHome_(me);
-  home.notice = `🕵️ 오늘 판정 완료! 활동 보상 +${SPY_REWARD}`;
+  home.notice = `🕵️ 오늘 판정 제출 완료! 활동 보상 +${SPY_REWARD}은 선생님이 정산할 때 들어와요`;
   return home;
 }
 
@@ -1057,15 +1064,19 @@ function accuseSpy(token, targetNo) {
     const active = activeSpy_(readSpies_(), today);
     success = !!active && active.no === to;
     if (success) {
-      moved = readLedger_()
+      // 이미 정산된 활동 보상(기록장) + 아직 정산 대기 중인 활동 보상을 모두 옮긴다
+      const settled = readLedger_()
         .filter((r) => !r.cancelled && r.no === to && r.mission === '암행어사활동')
         .reduce((sum, r) => sum + r.score, 0);
-      if (moved > 0) {
-        appendRecords_([
-          { date: today, no: to, mission: '검거이전', score: -moved, inputType: '시스템', inputBy: '자동', memo: `검거됨 → ${me.no}번에게 활동 보상 이전` },
-          { date: today, no: me.no, mission: '검거이전', score: moved, inputType: '시스템', inputBy: '자동', memo: `${to}번 암행어사 검거 성공` },
-        ]);
-      }
+      const pending = readJudges_().filter((j) => j.spy === to && !j.settled && j.reward !== '이전됨');
+      moved = settled + pending.length * SPY_REWARD;
+      const recs = [];
+      if (settled > 0) recs.push({ date: today, no: to, mission: '검거이전', score: -settled, inputType: '시스템', inputBy: '자동', memo: `검거됨 → ${me.no}번에게 활동 보상 이전` });
+      if (moved > 0) recs.push({ date: today, no: me.no, mission: '검거이전', score: moved, inputType: '시스템', inputBy: '자동', memo: `${to}번 암행어사 검거 성공` });
+      if (recs.length) appendRecords_(recs);
+      // 정산 대기 중이던 활동 보상은 지목한 투투에게 이미 줬으므로, 정산 때 암행어사에게 다시 주지 않는다
+      const jsh = sheet_(SHEETS.SPY_JUDGE);
+      pending.forEach((j) => jsh.getRange(j.row, JC.REWARD).setValue('이전됨'));
       sheet_(SHEETS.SPY).getRange(active.row, 5, 1, 2).setValues([['검거됨', new Date()]]);
     }
     const sh = sheet_(SHEETS.ACCUSE);
@@ -1103,6 +1114,43 @@ function adminAppointSpy(token, payload) {
   return buildAdminDashboard_();
 }
 
+/**
+ * 정산: 정산 대기 중인 판정을 모두 기록장 도장으로 바꾼다 (판정한 날짜로 기록).
+ * 예전 방식(제출 즉시 기록)으로 이미 기록장에 들어간 판정은 다시 넣지 않고 정산 표시만 한다.
+ */
+function adminSettleSpy(token) {
+  requireAdmin_(token);
+  let count = 0;
+  withLock_(() => {
+    ensureSchema_();
+    const pending = readJudges_().filter((j) => !j.settled);
+    if (!pending.length) throw new Error('정산할 판정이 없어요.');
+    const ledger = readLedger_();
+    const sh = sheet_(SHEETS.SPY_JUDGE);
+    const recs = [];
+    const now = new Date();
+    pending.forEach((j) => {
+      const already = ledger.some((r) => r.mission === '암행어사판정' && r.date === j.date && r.inputBy === j.spy);
+      let reward = j.reward;
+      if (!already) {
+        j.good.forEach((no, i) => recs.push({ date: j.date, no, mission: '암행어사판정', score: GOOD_SCORES[i], inputType: '암행어사', inputBy: j.spy, memo: `바른 언어 ${i + 1}위 (정산)` }));
+        j.bad.forEach((no, i) => recs.push({ date: j.date, no, mission: '암행어사판정', score: BAD_SCORES[i], inputType: '암행어사', inputBy: j.spy, memo: `나쁜 언어 ${i + 1}위 (정산)` }));
+        if (reward !== '이전됨') {
+          recs.push({ date: j.date, no: j.spy, mission: '암행어사활동', score: SPY_REWARD, inputType: '시스템', inputBy: '자동', memo: '판정 제출 보상 (정산)' });
+          reward = '지급';
+        }
+      }
+      sh.getRange(j.row, JC.SETTLED, 1, 3).setValues([[true, now, reward || '지급']]);
+      count++;
+    });
+    if (recs.length) appendRecords_(recs);
+    invalidateStats_();
+  });
+  const d = buildAdminDashboard_();
+  d.notice = `판정 ${count}건을 정산했어요.`;
+  return d;
+}
+
 /** 실수로 지정했을 때 등: 상태를 "해임"으로 */
 function adminDismissSpy(token, row) {
   requireAdmin_(token);
@@ -1137,7 +1185,8 @@ function spyAdminData_(students) {
       row: s.row, week: s.week, name: nm(s.no), start: s.start, end: s.end,
       status: s.status === '활동중' && s.end < today ? '임기종료' : s.status,
     })),
-    judges: readJudges_().reverse().map((j) => ({ date: j.date, spy: nm(j.spy), good: j.good.map(nm), bad: j.bad.map(nm) })),
+    judges: readJudges_().reverse().map((j) => ({ date: j.date, spy: nm(j.spy), good: j.good.map(nm), bad: j.bad.map(nm), settled: j.settled })),
+    pendingCount: readJudges_().filter((j) => !j.settled).length,
     accuses: readAccuses_().reverse().map((a) => ({ ts: a.ts, from: nm(a.from), to: nm(a.to), result: a.result, moved: a.moved })),
     accusedCount: readAccuses_().length,
   };
@@ -1407,7 +1456,7 @@ function sheetDefs_() {
  */
 function ensureSchema_(force) {
   const cache = CacheService.getScriptCache();
-  if (!force && cache.get('schema_ok_v9')) return;
+  if (!force && cache.get('schema_ok_v10')) return;
   const ss = ss_();
   sheetDefs_().forEach((def) => {
     let sh = ss.getSheetByName(def.name);
@@ -1439,7 +1488,7 @@ function ensureSchema_(force) {
     if (created) (def.widths || []).forEach((w, i) => sh.setColumnWidth(i + 1, w));
   });
   ensureConfigRows_(ss);
-  cache.put('schema_ok_v9', '1', 21600);
+  cache.put('schema_ok_v10', '1', 21600);
 }
 
 /** 설정 시트에 새로 생긴 항목이 없으면 기본값으로 맨 아래에 추가 (담임이 고친 값은 그대로) */
@@ -1601,7 +1650,7 @@ function clearAllCaches() {
 }
 
 function clearAllCaches_() {
-  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v9']);
+  CacheService.getScriptCache().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v10']);
   invalidateStats_();
 }
 
@@ -1779,6 +1828,7 @@ function buildStudentHome_(me) {
     },
     rewards: cfg.rewards,
     rankPublicCount: cfg.rankPublicCount,
+    rules: { praiseMinLength: cfg.praiseMinLength, dozeAllowed: cfg.dozeAllowed, excluded: cfg.excludedSubjects || [] },
     classSigns: hist.records
       .filter((r) => r.mission === '수업참여' || r.mission === 'MVP')
       .map((r) => ({ date: r.date, period: r.period, subject: r.subject, mvp: r.mission === 'MVP', score: r.score })),
@@ -2285,6 +2335,11 @@ const HTML_SOURCES = {
       <h3>지정 기록</h3>
       <div class="table-wrap"><table id="spyHist"></table></div>
       <h3>판정 기록</h3>
+      <div class="row" style="margin-bottom:8px">
+        <div class="grow" id="settleState"></div>
+        <button class="btn yellow" id="settleBtn" style="flex:0 0 auto">💰 정산하기</button>
+      </div>
+      <p class="muted" style="margin-top:0">판정 도장(+5~−5)과 암행어사 활동 보상(+3)은 정산할 때 한꺼번에 들어가요. 다른 투투가 도장판 변화로 암행어사를 눈치채지 못하게 하기 위해서예요.</p>
       <div class="table-wrap"><table id="spyJudges"></table></div>
       <h3>지목 기록 <span class="muted" id="accCount" style="font-size:13px"></span></h3>
       <div class="table-wrap"><table id="spyAcc"></table></div>
@@ -2498,7 +2553,7 @@ const HTML_SOURCES = {
       ['랭킹', c.rankLocked ? '🔒 잠금' : '🔓 공개'],
     ];
     $('cards').innerHTML = cards.map(([k, v]) => \`<div class="card"><div class="k">\${esc(k)}</div><div class="v" style="font-size:18px">\${esc(v)}</div></div>\`).join('');
-    $('warnings').innerHTML = (d.cfg.testMode ? '<div class="warn">🧪 테스트 모드가 켜져 있어요. 테스트가 끝나면 ⚙️ 설정 탭에서 끄고 테스트 기록을 지워 주세요.</div>' : '') + (d.spy.needAppoint ? \`<div class="warn">🚨 \${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>\` : '') +
+    $('warnings').innerHTML = (d.spy.pendingCount ? \`<div class="warn">💰 암행어사 판정 정산 대기 \${d.spy.pendingCount}건 (🕵️ 암행어사 탭에서 정산)</div>\` : '') + (d.cfg.testMode ? '<div class="warn">🧪 테스트 모드가 켜져 있어요. 테스트가 끝나면 ⚙️ 설정 탭에서 끄고 테스트 기록을 지워 주세요.</div>' : '') + (d.spy.needAppoint ? \`<div class="warn">🚨 \${d.spy.caughtToday ? '암행어사가 검거됐어요! ' : ''}새 암행어사 지정이 필요해요. (🕵️ 암행어사 탭)</div>\` : '') +
       d.warnings.map((w) => \`<div class="warn">⚠️ \${esc(w)}</div>\`).join('');
 
     $('sortBtn').textContent = S.sort === 'rank' ? '순위순 ▾' : '번호순 ▾';
@@ -2581,8 +2636,13 @@ const HTML_SOURCES = {
       (sp.history.map((h) => \`<tr><td>\${esc(h.week)}</td><td class="left">\${esc(h.name)}</td><td>\${esc(h.start.slice(5))}~\${esc(h.end.slice(5))}</td>
         <td class="\${h.status === '검거됨' ? 'minus' : h.status === '활동중' ? 'plus' : 'muted'}">\${esc(h.status)}</td>
         <td>\${h.status === '활동중' ? \`<button class="btn sm danger" data-dismiss="\${h.row}">해임</button>\` : ''}</td></tr>\`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
-    $('spyJudges').innerHTML = '<tr><th>날짜</th><th class="left">암행어사</th><th class="left">😊 바른 1·2·3위</th><th class="left">🤬 나쁜 1·2·3위</th></tr>' +
-      (sp.judges.map((j) => \`<tr><td>\${esc(j.date.slice(5))}</td><td class="left">\${esc(j.spy)}</td><td class="left plus">\${j.good.map(esc).join(', ')}</td><td class="left minus">\${j.bad.map(esc).join(', ') || '-'}</td></tr>\`).join('') || '<tr><td colspan="4" class="muted">아직 없어요.</td></tr>');
+    $('settleState').innerHTML = sp.pendingCount
+      ? \`정산 대기 <b class="yellow">\${sp.pendingCount}건</b>\`
+      : '<span class="muted">정산 대기 없음</span>';
+    $('settleBtn').disabled = !sp.pendingCount;
+    $('spyJudges').innerHTML = '<tr><th>날짜</th><th class="left">암행어사</th><th class="left">😊 바른 1·2·3위</th><th class="left">🤬 나쁜 1·2·3위</th><th>정산</th></tr>' +
+      (sp.judges.map((j) => \`<tr><td>\${esc(j.date.slice(5))}</td><td class="left">\${esc(j.spy)}</td><td class="left plus">\${j.good.map(esc).join(', ')}</td><td class="left minus">\${j.bad.map(esc).join(', ') || '-'}</td>
+        <td class="\${j.settled ? 'plus' : 'yellow'}">\${j.settled ? '완료' : '대기'}</td></tr>\`).join('') || '<tr><td colspan="5" class="muted">아직 없어요.</td></tr>');
     $('accCount').textContent = \`(\${sp.accusedCount}/\${d.students.length}명 사용)\`;
     $('spyAcc').innerHTML = '<tr><th>시각</th><th class="left">지목한</th><th class="left">지목된</th><th>결과</th><th>이동</th></tr>' +
       (sp.accuses.map((a) => \`<tr><td>\${esc(String(a.ts).slice(5, 16))}</td><td class="left">\${esc(a.from)}</td><td class="left">\${esc(a.to)}</td>
@@ -2778,6 +2838,12 @@ const HTML_SOURCES = {
   $('manualBtn').onclick = submitManual;
   $('groupBtn').onclick = groupStamp;
   $('spyBtn').onclick = appointSpy;
+  $('settleBtn').onclick = async () => {
+    const n = S.data.spy.pendingCount;
+    const ok = await modal({ title: '암행어사 판정 정산', html: \`<p>정산 대기 중인 판정 <b class="yellow">\${n}건</b>의 도장(판정 +/−, 활동 보상 +3)을 기록장에 넣어요.</p><p class="muted">판정한 날짜로 기록되고, 투투 화면에는 "암행어사 판정 +5"처럼만 보여요.</p>\`, okText: '정산하기' });
+    if (!ok) return;
+    try { const d = await call('adminSettleSpy', S.token); setData(d); toast(d.notice || '정산했어요.'); } catch (e) { toast(e.message, true); }
+  };
   $('drawOnly').addEventListener('change', renderReward);
   $('drawTable').onclick = (e) => { const b = e.target.closest('[data-draw]'); if (b && !b.disabled) setDrawDone(b.dataset.draw, Number(b.dataset.n)); };
   $('spyHist').onclick = (e) => { const b = e.target.closest('[data-dismiss]'); if (b) dismissSpy(Number(b.dataset.dismiss)); };
@@ -3000,6 +3066,10 @@ const HTML_SOURCES = {
     .jump a:active { background: var(--sky); color: #04203d; }
     .box, .space { scroll-margin-top: 60px; }
 
+    .rule-list { margin: 6px 0 10px; padding-left: 20px; }
+    .rule-list li { margin: 6px 0; line-height: 1.55; }
+    #rules details { border-bottom: 1px solid #ffffff14; padding: 4px 0; }
+
     .topbar { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .topbar .hi { flex: 1; font-weight: 700; }
     .topbar .hi b { color: var(--yellow); }
@@ -3029,6 +3099,7 @@ const HTML_SOURCES = {
   <section id="app" class="hidden">
     <div class="topbar">
       <div class="hi" id="hi"></div>
+      <button class="btn sm ghost hidden" id="spyToggle" aria-label="비밀 메뉴">🔒</button>
       <button class="btn sm ghost" id="refreshBtn">새로고침</button>
       <button class="btn sm danger" id="logoutBtn">나가기</button>
     </div>
@@ -3036,7 +3107,7 @@ const HTML_SOURCES = {
     <!-- 바로가기 -->
     <nav class="jump" id="jump">
       <a data-to="rankBox">🏆 랭킹</a><a data-to="questBox">⭐ 퀘스트</a><a data-to="boardSec">🌍 도장판</a>
-      <a data-to="inboxSec">💌 칭찬함</a><a data-to="accuseBox">🔍 지목</a><a data-to="rewardSec">🎁 보상</a>
+      <a data-to="inboxSec">💌 칭찬함</a><a data-to="accuseBox">🔍 지목</a><a data-to="rulesSec">📖 규칙</a><a data-to="rewardSec">🎁 보상</a>
     </nav>
 
     <!-- 랭킹 -->
@@ -3142,6 +3213,12 @@ const HTML_SOURCES = {
       <h2 class="bubble-title" id="signTitle"></h2>
       <div class="space-sub" style="margin:6px 0 10px">수업 적극 참여 +2 · 수업 MVP +3</div>
       <div class="signs" id="signs"></div>
+    </div>
+
+    <!-- 도장 얻는 규칙 -->
+    <div class="box" id="rulesSec">
+      <h2 class="title-font">📖 도장 얻는 규칙</h2>
+      <div id="rules"></div>
     </div>
 
     <!-- 보상 안내 -->
@@ -3299,6 +3376,7 @@ const HTML_SOURCES = {
     renderInbox(d);
     renderSpy(d);
     renderRewardGuide(d);
+    renderRules(d);
     $('stamp').textContent = \`마지막 갱신 \${d.serverTime} · 30초마다 자동 갱신\`;
   }
 
@@ -3479,12 +3557,18 @@ const HTML_SOURCES = {
   function renderSpy(d) {
     // 암행어사 임무
     const m = d.spy.mission;
-    $('spyBox').classList.toggle('hidden', !m);
-    if (m && !$('spyBox').contains(document.activeElement)) {
-      const head = \`<h2 class="title-font">🕵️ 암행어사 임무 <span class="secret">나만 보여요 · 비밀!</span></h2>
-        <p class="muted" style="margin:0">임기: \${md(m.start)} ~ \${md(m.end)} · 친구들에게 정체를 들키지 않게 조심!</p>\`;
+    // 평소에는 닫아 두고, 위쪽 작은 🔒 버튼으로만 연다 (친구가 화면을 봐도 눈에 띄지 않게)
+    $('spyToggle').classList.toggle('hidden', !m);
+    if (!m) S.spyOpen = false;
+    $('spyBox').classList.toggle('hidden', !m || !S.spyOpen);
+    $('spyToggle').textContent = S.spyOpen ? '🔓' : '🔒';
+    if (m && S.spyOpen && !$('spyBox').contains(document.activeElement)) {
+      const head = \`<div class="row"><h2 class="title-font grow" style="margin:0">🕵️ 암행어사 임무 <span class="secret">나만 보여요 · 비밀!</span></h2>
+          <button class="btn sm ghost" style="flex:0 0 auto" id="spyClose">닫기 🔒</button></div>
+        <p class="muted" style="margin:6px 0 0">임기: \${md(m.start)} ~ \${md(m.end)} · 친구들에게 정체를 들키지 않게 조심!</p>
+        <p class="muted" style="margin:4px 0 0">판정 도장과 활동 보상은 담임 선생님이 <b>정산</b>할 때 한꺼번에 들어가요.\${m.pendingReward ? \` (정산 대기 중인 내 활동 보상 <b class="yellow">+\${m.pendingReward}</b>)\` : ''}</p>\`;
       if (!m.isSchoolDay) $('spyBox').innerHTML = head + '<p>오늘은 등교일이 아니라 판정이 없어요.</p>';
-      else if (m.judgedToday) $('spyBox').innerHTML = head + \`<div class="stamp-done">✅ 오늘 판정 완료! (활동 보상 +\${m.reward})</div>\`;
+      else if (m.judgedToday) $('spyBox').innerHTML = head + \`<div class="stamp-done">✅ 오늘 판정 완료!</div>\`;
       else {
         const rows = (kind, label, scores) => [0, 1, 2].map((i) => \`<div class="jrow"><span class="rk \${kind}">\${label} \${i + 1}위 <small>(\${scores[i]})</small></span>
           <select data-j="\${kind}\${i}">\${options(d.friends, S.judge[kind + i] || '', kind === 'good' ? '친구 선택 (필수)' : '없음')}</select></div>\`).join('');
@@ -3537,7 +3621,7 @@ const HTML_SOURCES = {
     if (new Set(all).size !== all.length) return toast('한 친구를 두 번 고를 수 없어요.', true);
     const nm = (no) => (S.data.friends.find((f) => f.no === no) || {}).name || no;
     const ok = await confirmBox('오늘 판정 제출', \`<p>😊 \${good.map(nm).map(esc).join(', ')}</p><p>🤬 \${bad.length ? bad.map(nm).map(esc).join(', ') : '없음'}</p><p class="muted">제출하면 바꿀 수 없어요.</p>\`, '제출');
-    if (ok && (await act('spyJudge', good, bad))) S.judge = {};
+    if (ok && (await act('spyJudge', good, bad))) { S.judge = {}; S.spyOpen = false; S.lastKey = ''; render(); }
   }
 
   async function submitAccuse() {
@@ -3546,6 +3630,33 @@ const HTML_SOURCES = {
     const name = (S.data.friends.find((f) => f.no === no) || {}).name || '';
     const ok = await confirmBox('정말 지목할까요?', \`<p style="font-size:20px;text-align:center"><b class="yellow">\${esc(name)}</b></p><p>지목 기회는 <b>기간 중 1번</b>뿐이에요. 되돌릴 수 없어요!</p>\`, '지목하기');
     if (ok) act('accuseSpy', no);
+  }
+
+  function renderRules(d) {
+    const r = d.rules || {};
+    const li = (t) => \`<li>\${t}</li>\`;
+    $('rules').innerHTML = \`
+      <details open><summary>⭐ 미션1. 일일퀘스트 깨기! <span class="yellow">하루 최대 +1</span></summary><ul class="rule-list">
+        \${li(\`💌 <b>친구에게 칭찬 1회</b>: 친구를 골라 칭찬 문장을 써요 (\${r.praiseMinLength}자 이상). 하루 1번, 한 번 칭찬한 친구는 다시 고를 수 없어요.\`)}
+        \${li('🚫 비난·비판·놀림이 담긴 칭찬이나 <b>구체적이지 않은 칭찬</b>은 담임 선생님이 숨기고 칭찬 미션도 취소돼요.')}
+        \${li('🙇 <b>복도에서 선생님께 인사 2회</b>: 인사한 <b>서로 다른 선생님 2분</b>을 기록해요.')}
+        \${li(\`😴 <b>수업 시간에 졸지 않기</b>: 하교 후 교시마다 체크해요. 😴가 <b>\${r.dozeAllowed}개 이하</b>면 성공!\${r.excluded && r.excluded.length ? \` (\${r.excluded.map(esc).join(', ')} 시간은 제외)\` : ''}\`)}
+        \${li('✅ 3가지를 모두 완료하면 <b class="yellow">도장 +1</b>. 오늘 날짜만 입력할 수 있고, 양심에 따라 체크해요!')}
+      </ul></details>
+      <details><summary>🕵️ 미션2. 욕설 암행어사를 찾아라!</summary><ul class="rule-list">
+        \${li('비밀 암행어사(임기 1주)가 매일 우리 반 언어를 관찰해요.')}
+        \${li('바른 언어 1·2·3위 <b class="plus">+5 / +3 / +1</b>, 나쁜 언어 1·2·3위 <b class="minus">−5 / −3 / −1</b>')}
+        \${li('판정 도장은 담임 선생님이 <b>정산</b>할 때 한꺼번에 들어와요.')}
+        \${li('🔍 기간 중 <b>딱 1번</b> 암행어사를 지목할 수 있어요. 맞히면 암행어사가 받은 활동 보상 도장을 <b>모두</b> 가져와요! 틀려도 벌점은 없어요.')}
+      </ul></details>
+      <details><summary>📒 미션3. 수업 듣고 도장 얻자!</summary><ul class="rule-list">
+        \${li('수업 시간에 적극 참여(좋은 질문·발표)하거나 선생님께 칭찬받으면 <b class="plus">+2</b> (한 교시에 1번)')}
+        \${li('수업 MVP로 뽑히면 <b class="plus">+3</b> (교시마다 1명)')}
+        \${li('단체 도장판에 싸인을 받으면 반 전체 <b class="plus">+3</b>')}
+      </ul></details>
+      <details><summary>🎁 보상</summary><ul class="rule-list">
+        \${li(\`랭킹 1~5위 보상 + 일퀘 모두 클리어 또는 도장 \${d.draw.threshold}개 이상이면 쿠폰 뽑기 (아래 보상 안내 참고)\`)}
+      </ul></details>\`;
   }
 
   function renderRewardGuide(d) {
@@ -3578,6 +3689,11 @@ const HTML_SOURCES = {
   $('loginBtn').onclick = login;
   $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
   $('refreshBtn').onclick = () => refresh(false);
+  $('spyToggle').onclick = () => {
+    S.spyOpen = !S.spyOpen; S.lastKey = ''; render();
+    if (S.spyOpen) $('spyBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  $('spyBox').addEventListener('click', (e) => { if (e.target.id === 'spyClose') { S.spyOpen = false; S.lastKey = ''; render(); } });
   $('jump').onclick = (e) => { const a = e.target.closest('[data-to]'); if (a) $(a.dataset.to).scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   $('friendChips').onclick = (e) => {
     const b = e.target.closest('[data-friend]');
