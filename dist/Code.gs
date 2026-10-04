@@ -3141,6 +3141,7 @@ const HTML_SOURCES = {
     <input id="code" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" placeholder="선생님께 받은 코드">
     <button class="btn yellow block" style="margin-top:14px" id="loginBtn">입장하기</button>
     <p class="muted" style="margin-top:10px">한 번 입장하면 캠페인 기간 동안 로그인이 유지돼요.</p>
+    <p class="muted" style="margin:6px 0 0">🤫 앱은 친구가 옆에서 보지 않을 때 혼자 열어요. (암행어사로 뽑히면 비밀 안내가 뜰 수 있어요!)</p>
   </section>
 
   <!-- 내 화면 -->
@@ -3722,6 +3723,7 @@ const HTML_SOURCES = {
       </ul></details>
       <details><summary>🕵️ 미션2. 욕설 암행어사를 찾아라!</summary><ul class="rule-list">
         \${li('비밀 암행어사(임기 1주)가 매일 우리 반 언어를 관찰해요.')}
+        \${li('🤫 암행어사로 뽑히면 앱을 열 때 비밀 안내가 떠요. 그래서 <b>모두</b> 친구가 보지 않을 때 혼자 앱을 열어요.')}
         \${li('바른 언어 1·2·3위 <b class="plus">+5 / +3 / +1</b>, 나쁜 언어 1·2·3위 <b class="minus">−5 / −3 / −1</b>')}
         \${li('판정 도장은 담임 선생님이 <b>정산</b>할 때 한꺼번에 들어와요.')}
         \${li('🔍 기간 중 <b>딱 1번</b> 암행어사를 지목할 수 있어요. 맞히면 암행어사가 받은 활동 보상 도장을 <b>모두</b> 가져와요! 틀려도 벌점은 없어요.')}
@@ -4269,4 +4271,4 @@ const HTML_SOURCES = {
 </html>
 `,
 };
-const BUNDLE_BUILD = 'ba8834b1';
+const BUNDLE_BUILD = 'aab5ba3b';
