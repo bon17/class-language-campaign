@@ -621,7 +621,7 @@
     $('qGreet').className = 'quest' + (g.done ? ' done' : '');
     $('qGreetSt').textContent = g.done ? '완료' : `${g.list.length}/2`;
     $('greetList').innerHTML = g.list.map((t, i) =>
-      `<span class="greeted">🙇 ${esc(t)} ${locked ? '' : `<button data-ungreet="${i}" aria-label="지우기">×</button>`}</span>`).join('');
+      `<span class="greeted" data-name="${esc(t)}">🙇 ${esc(t)} ${locked ? '' : `<button data-ungreet="${i}" aria-label="지우기">×</button>`}</span>`).join('');
     $('greetForm').classList.toggle('hidden', locked || g.list.length >= 2);
     $('teacherChips').innerHTML = d.teachers.filter((t) => g.list.indexOf(t) < 0)
       .map((t) => `<button class="chip" data-teacher="${esc(t)}">${esc(t)}</button>`).join('');
@@ -836,11 +836,29 @@
     if (await act('praiseSubmit', S.praiseTo, text)) { $('praiseText').value = ''; S.praiseTo = ''; }
     $('praiseBtn').disabled = false;
   };
-  $('teacherChips').onclick = (e) => { const b = e.target.closest('[data-teacher]'); if (b) act('questGreet', b.dataset.teacher); };
-  $('greetBtn').onclick = async () => {
+  /** 인사 기록: 누르자마자 화면에 먼저 보여 주고, 저장은 뒤에서 (실패하면 서버 상태로 되돌림) */
+  function greetNow(name) {
+    const shown = [...document.querySelectorAll('#greetList .greeted')].map((x) => x.dataset.name);
+    if (shown.length >= 2) return toast('오늘 인사 2회를 이미 모두 기록했어요.', true);
+    if (shown.indexOf(name) >= 0) return toast('서로 다른 선생님 2분께 인사해야 해요.', true);
+    const pill = document.createElement('span');
+    pill.className = 'greeted';
+    pill.dataset.name = name;
+    pill.textContent = '🙇 ' + name + ' · 저장 중…';
+    $('greetList').appendChild(pill);
+    const n = shown.length + 1;
+    $('qGreetSt').textContent = n >= 2 ? '완료' : `${n}/2`;
+    if (n >= 2) { $('qGreet').className = 'quest done'; $('greetForm').classList.add('hidden'); }
+    const chip = [...document.querySelectorAll('#teacherChips [data-teacher]')].find((c) => c.dataset.teacher === name);
+    if (chip) chip.remove();
+    return act('questGreet', name);
+  }
+  $('teacherChips').onclick = (e) => { const b = e.target.closest('[data-teacher]'); if (b) greetNow(b.dataset.teacher); };
+  $('greetBtn').onclick = () => {
     const v = $('greetInput').value.trim();
     if (!v) return toast('선생님 이름을 입력해 주세요.', true);
-    if (await act('questGreet', v)) $('greetInput').value = '';
+    $('greetInput').value = '';
+    greetNow(v);
   };
   $('greetList').onclick = (e) => { const b = e.target.closest('[data-ungreet]'); if (b) act('questUngreet', Number(b.dataset.ungreet)); };
   $('dozeList').onclick = (e) => {
