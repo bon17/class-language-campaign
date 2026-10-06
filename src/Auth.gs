@@ -44,11 +44,19 @@ function recordLoginFail_(bucket) {
   Utilities.sleep(700);
 }
 
+/** 입력한 코드에서 공백을 뺀다 (휴대폰 키보드가 넣는 띄어쓰기 등) */
+function normalizeCode_(code) {
+  return String(code === null || code === undefined ? '' : code).replace(/\s+/g, '');
+}
+
 function loginAdmin_(code) {
   checkLoginRate_('admin');
-  const cfg = getConfig();
+  const input = normalizeCode_(code);
+  let cfg = getConfig();
+  // 담임이 설정 시트에서 코드를 막 바꿨다면 캐시가 옛 코드일 수 있어 시트를 다시 읽는다
+  if (input !== cfg.adminCode) cfg = refreshConfig_();
   if (!cfg.adminCode) throw new Error('담임 코드가 설정되지 않았어요. 설정 시트를 확인해 주세요.');
-  if (String(code || '').trim() !== cfg.adminCode) {
+  if (input !== cfg.adminCode) {
     recordLoginFail_('admin');
     throw new Error('담임 코드가 올바르지 않아요.');
   }
@@ -128,9 +136,11 @@ function requireStudent_(token) {
 /** 공통 코드로 태블릿 잠금 해제. 설정의 코드가 바뀌면 기존 태블릿은 다시 잠긴다. */
 function loginTeacherDevice_(code) {
   checkLoginRate_('teacher');
-  const cfg = getConfig();
+  const input = normalizeCode_(code);
+  let cfg = getConfig();
+  if (input !== cfg.teacherCode) cfg = refreshConfig_();
   if (!cfg.teacherCode) throw new Error('교과 선생님 코드가 설정되지 않았어요. 담임 선생님께 알려 주세요.');
-  if (String(code || '').trim() !== cfg.teacherCode) {
+  if (input !== cfg.teacherCode) {
     recordLoginFail_('teacher');
     throw new Error('코드가 맞지 않아요.');
   }

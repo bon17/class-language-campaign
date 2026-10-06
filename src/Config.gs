@@ -123,8 +123,18 @@ function getConfig() {
     // 빠진 항목이 있으면(다른 버전이 만든 캐시 등) 시트에서 다시 읽는다
     if (CONFIG_DEFS.every((d) => d.key in cached) && 'teacherList' in cached) return cached;
   }
+  return refreshConfig_();
+}
+
+/**
+ * 캐시를 건너뛰고 설정 시트를 바로 읽어 캐시를 새로 채운다.
+ * 웹앱(배포된 버전)과 시트 편집기(최신 코드)의 캐시 키가 버전별로 달라서
+ * 시트를 고쳐도 웹앱 쪽 캐시가 최대 10분간 옛 값을 줄 수 있다. 코드 확인처럼
+ * 바로 반영돼야 하는 곳에서 쓴다.
+ */
+function refreshConfig_() {
   const cfg = readConfigFromSheet_();
-  cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
+  cache_().put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
   return cfg;
 }
 
@@ -169,7 +179,7 @@ function parseConfigValue_(d, v) {
     case 'list':
       return String(empty ? d.def : v).split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
     case 'code':
-      return empty ? '' : String(v).trim();
+      return empty ? '' : String(v).replace(/\s+/g, '');
     default:
       return empty ? d.def : String(v).trim();
   }

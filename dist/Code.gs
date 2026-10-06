@@ -130,8 +130,18 @@ function getConfig() {
     // 빠진 항목이 있으면(다른 버전이 만든 캐시 등) 시트에서 다시 읽는다
     if (CONFIG_DEFS.every((d) => d.key in cached) && 'teacherList' in cached) return cached;
   }
+  return refreshConfig_();
+}
+
+/**
+ * 캐시를 건너뛰고 설정 시트를 바로 읽어 캐시를 새로 채운다.
+ * 웹앱(배포된 버전)과 시트 편집기(최신 코드)의 캐시 키가 버전별로 달라서
+ * 시트를 고쳐도 웹앱 쪽 캐시가 최대 10분간 옛 값을 줄 수 있다. 코드 확인처럼
+ * 바로 반영돼야 하는 곳에서 쓴다.
+ */
+function refreshConfig_() {
   const cfg = readConfigFromSheet_();
-  cache.put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
+  cache_().put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
   return cfg;
 }
 
@@ -176,7 +186,7 @@ function parseConfigValue_(d, v) {
     case 'list':
       return String(empty ? d.def : v).split(/[,\n]+/).map((s) => s.trim()).filter(Boolean);
     case 'code':
-      return empty ? '' : String(v).trim();
+      return empty ? '' : String(v).replace(/\s+/g, '');
     default:
       return empty ? d.def : String(v).trim();
   }
@@ -1366,11 +1376,19 @@ function recordLoginFail_(bucket) {
   Utilities.sleep(700);
 }
 
+/** 입력한 코드에서 공백을 뺀다 (휴대폰 키보드가 넣는 띄어쓰기 등) */
+function normalizeCode_(code) {
+  return String(code === null || code === undefined ? '' : code).replace(/\s+/g, '');
+}
+
 function loginAdmin_(code) {
   checkLoginRate_('admin');
-  const cfg = getConfig();
+  const input = normalizeCode_(code);
+  let cfg = getConfig();
+  // 담임이 설정 시트에서 코드를 막 바꿨다면 캐시가 옛 코드일 수 있어 시트를 다시 읽는다
+  if (input !== cfg.adminCode) cfg = refreshConfig_();
   if (!cfg.adminCode) throw new Error('담임 코드가 설정되지 않았어요. 설정 시트를 확인해 주세요.');
-  if (String(code || '').trim() !== cfg.adminCode) {
+  if (input !== cfg.adminCode) {
     recordLoginFail_('admin');
     throw new Error('담임 코드가 올바르지 않아요.');
   }
@@ -1450,9 +1468,11 @@ function requireStudent_(token) {
 /** 공통 코드로 태블릿 잠금 해제. 설정의 코드가 바뀌면 기존 태블릿은 다시 잠긴다. */
 function loginTeacherDevice_(code) {
   checkLoginRate_('teacher');
-  const cfg = getConfig();
+  const input = normalizeCode_(code);
+  let cfg = getConfig();
+  if (input !== cfg.teacherCode) cfg = refreshConfig_();
   if (!cfg.teacherCode) throw new Error('교과 선생님 코드가 설정되지 않았어요. 담임 선생님께 알려 주세요.');
-  if (String(code || '').trim() !== cfg.teacherCode) {
+  if (input !== cfg.teacherCode) {
     recordLoginFail_('teacher');
     throw new Error('코드가 맞지 않아요.');
   }
@@ -4289,4 +4309,4 @@ const HTML_SOURCES = {
 </html>
 `,
 };
-const BUNDLE_BUILD = 'bebfc166';
+const BUNDLE_BUILD = '697ca770';
