@@ -74,10 +74,31 @@ function sheetByName_(name) {
   return sh;
 }
 
+/**
+ * 읽기 전용 구간(대시보드 만들기 등)에서 같은 시트를 여러 번 읽지 않도록 결과를 기억한다.
+ * 구간 안에서는 시트에 쓰지 않으므로 기억한 값이 바뀔 일이 없다.
+ */
+let READ_MEMO_ = null;
+
+function withReadMemo_(fn) {
+  if (READ_MEMO_) return fn();
+  READ_MEMO_ = new Map();
+  try {
+    return fn();
+  } finally {
+    READ_MEMO_ = null;
+  }
+}
+
 /** 머리글을 뺀 데이터 행을 한 번의 요청으로 읽는다 (행 i → 시트 i+2행). 열 수는 ncols로 맞춘다. */
 function dataRows_(sh, ncols) {
   if (!sh) return [];
-  return sh.getDataRange().getValues().slice(1).map((r) => {
+  let values = READ_MEMO_ && READ_MEMO_.get(sh);
+  if (!values) {
+    values = sh.getDataRange().getValues();
+    if (READ_MEMO_) READ_MEMO_.set(sh, values);
+  }
+  return values.slice(1).map((r) => {
     const row = r.slice(0, ncols);
     while (row.length < ncols) row.push('');
     return row;
@@ -115,13 +136,17 @@ function cache_() {
   };
 }
 
+/** 한 번의 실행 안에서는 설정을 한 번만 읽는다 (설정을 고치면 비운다) */
+let CFG_MEMO_ = null;
+
 function getConfig() {
+  if (CFG_MEMO_) return CFG_MEMO_;
   const cache = cache_();
   const hit = cache.get(CACHE_KEYS.CONFIG);
   if (hit) {
     const cached = JSON.parse(hit);
     // 빠진 항목이 있으면(다른 버전이 만든 캐시 등) 시트에서 다시 읽는다
-    if (CONFIG_DEFS.every((d) => d.key in cached) && 'teacherList' in cached) return cached;
+    if (CONFIG_DEFS.every((d) => d.key in cached) && 'teacherList' in cached) return (CFG_MEMO_ = cached);
   }
   return refreshConfig_();
 }
@@ -135,7 +160,7 @@ function getConfig() {
 function refreshConfig_() {
   const cfg = readConfigFromSheet_();
   cache_().put(CACHE_KEYS.CONFIG, JSON.stringify(cfg), cfg.testMode ? 60 : 600);
-  return cfg;
+  return (CFG_MEMO_ = cfg);
 }
 
 function readConfigFromSheet_() {
@@ -202,6 +227,7 @@ function setConfigValue_(key, value) {
   if (idx >= 0) sh.getRange(idx + 2, 2).setValue(toSheetValue_(d, value));
   else sh.appendRow([d.label, toSheetValue_(d, value), d.desc]);
   cache_().remove(CACHE_KEYS.CONFIG);
+  CFG_MEMO_ = null;
 }
 
 /** "교과선생님" 시트: 과목 | 선생님 이름 (이름이 빈 줄은 건너뜀) */

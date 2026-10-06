@@ -77,6 +77,7 @@ function ensureConfigRows_(ss) {
   if (add.length) {
     sh.getRange(sh.getLastRow() + 1, 1, add.length, 3).setValues(add);
     cache_().remove(CACHE_KEYS.CONFIG);
+    CFG_MEMO_ = null;
   }
 }
 
@@ -217,11 +218,14 @@ function showWebAppUrls() {
 
 function clearAllCaches() {
   clearAllCaches_();
+  cache_().remove('schema_ok_v11');
   alert_('캐시를 비웠어요. 웹앱에 바로 반영됩니다.');
 }
 
+/** 데이터 캐시 비우기. 시트 구조 확인(schema_ok)은 그대로 둔다 — 매번 모든 시트를 다시 확인하면 몇 초씩 걸린다. */
 function clearAllCaches_() {
-  cache_().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE, 'schema_ok_v11']);
+  cache_().removeAll([CACHE_KEYS.CONFIG, CACHE_KEYS.STUDENTS, CACHE_KEYS.TIMETABLE]);
+  CFG_MEMO_ = null;
   invalidateStats_();
 }
 

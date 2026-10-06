@@ -72,7 +72,7 @@ function adminCancelRecord(token, id, reason) {
 function adminSetTestMode(token, on) {
   requireAdmin_(token);
   setConfigValue_('testMode', !!on);
-  clearAllCaches_();
+  invalidateStats_(); // 등교일이 바뀌므로 통계만 새로 계산
   return buildAdminDashboard_();
 }
 
@@ -114,6 +114,10 @@ function adminSetPraiseHidden(token, id, hidden) {
 }
 
 function buildAdminDashboard_() {
+  return withReadMemo_(buildAdminDashboardNow_);
+}
+
+function buildAdminDashboardNow_() {
   const cfg = getConfig();
   const { students, records, stats } = buildDataBundle_();
 
